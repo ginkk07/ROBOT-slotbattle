@@ -1,0 +1,38 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+
+import { getItem } from '../src/game/data/items.js';
+import { getSkill } from '../src/game/data/skills.js';
+import { getStatus } from '../src/game/data/statuses.js';
+import { getUnit } from '../src/game/data/units.js';
+import { validateGameData } from '../src/game/data/validate.js';
+
+test('所有遊戲資料庫的交叉引用都有效', () => {
+  assert.equal(validateGameData(), true);
+});
+
+test('單位以rank與tags區分普通、菁英與Boss', () => {
+  const elite = getUnit('elite-ruins-sentinel');
+  const boss = getUnit('ruins-guardian');
+
+  assert.equal(elite.rank, 'elite');
+  assert.ok(elite.tags.includes('elite'));
+  assert.equal(boss.rank, 'boss');
+  assert.ok(boss.tags.includes('construct'));
+  assert.equal(boss.lootTableId, 'ruins-boss-loot');
+});
+
+test('技能與道具共用effects資料格式', () => {
+  assert.deepEqual(getSkill('life-recovery').effects[0], {
+    type: 'heal',
+    amountPerPoint: 2,
+    target: 'self',
+  });
+  assert.equal(getItem('fire-bomb').effects[1].statusId, 'burning');
+  assert.equal(getStatus('burning').bossRule.mode, 'reduced');
+});
+
+test('資料定義為唯讀，戰鬥不能誤改原始資料庫', () => {
+  assert.equal(Object.isFrozen(getUnit('ruins-guardian')), true);
+  assert.equal(Object.isFrozen(getUnit('ruins-guardian').tags), true);
+});

@@ -129,3 +129,19 @@ test('可以放棄尚未結束的遊戲', () => {
     skill: 0,
   });
 });
+
+test('開局配置會帶入技能與初始道具', () => {
+  const state = createGame({
+    id: 'loadout-test',
+    ownerId: 'player-1',
+    loadout: {
+      skillIds: ['life-recovery'],
+      itemIds: ['healing-potion', 'healing-potion'],
+    },
+  });
+
+  assert.deepEqual(state.player.skillIds, ['life-recovery']);
+  assert.deepEqual(state.player.inventory, [
+    { itemId: 'healing-potion', quantity: 2 },
+  ]);
+});
