@@ -91,10 +91,13 @@ test('投入點數按鈕會建立可輸入剩餘行動點的Modal', () => {
   assert.match(input.label, /1～4/);
 });
 
-test('玩法說明只告訴玩家操作方式，不顯示機率或三次上限', () => {
+test('玩法說明使用定稿文案，不顯示固定行動點或內部機率', () => {
   const description = renderRules().embeds[0].description;
-  assert.match(description, /一次投入，也可以分次投入/);
-  assert.match(description, /回合結束/);
-  assert.match(description, /⚔️攻擊、🛡️防禦、✨技能、🍀幸運與💀不幸/);
-  assert.doesNotMatch(description, /30%|最多拉霸|結束抽選/);
+  assert.match(description, /每回合開始時會獲得行動點/);
+  assert.match(description, /一次投入，也可以拆成多次拉霸/);
+  assert.match(description, /⚔️｜🛡️｜✨｜🍀｜💀/);
+  assert.match(description, /🍀則會同時獲得上述全部效果/);
+  assert.match(description, /三個💀就會進入暈眩狀態/);
+  assert.match(description, /\/slotbattle profile/);
+  assert.doesNotMatch(description, /4 點行動點|30%|最多拉霸|結束抽選/);
 });
