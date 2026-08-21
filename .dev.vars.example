@@ -1,0 +1,5 @@
+# 複製為 .dev.vars 後可供 `npm run worker:dev` 本機測試。
+# .dev.vars 不會被 Git 追蹤，請勿把真實密鑰提交到 GitHub。
+DISCORD_PUBLIC_KEY=""
+APPS_SCRIPT_URL=""
+APPS_SCRIPT_SECRET=""

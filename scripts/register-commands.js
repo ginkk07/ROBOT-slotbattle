@@ -6,7 +6,7 @@ const token = requiredEnvironment('DISCORD_TOKEN');
 const clientId = requiredEnvironment('DISCORD_CLIENT_ID');
 const guildId = process.env.DISCORD_GUILD_ID?.trim();
 const rest = new REST({ version: '10' }).setToken(token);
-const body = commands.map((command) => command.toJSON());
+const body = commands;
 
 if (guildId) {
   await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body });
