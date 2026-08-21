@@ -4,6 +4,14 @@
   "main": "src/worker.js",
   "compatibility_date": "2026-08-20",
   "workers_dev": true,
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "slotbattle-data",
+      "database_id": "c14433c5-fe61-4b15-9e19-e56e4393acfc",
+      "migrations_dir": "migrations"
+    }
+  ],
   "observability": {
     "enabled": true
   }

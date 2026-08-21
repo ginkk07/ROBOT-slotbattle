@@ -39,6 +39,9 @@ function doPost(e) {
       case 'saveProfile':
         result = saveProfile_(body.profile, body.expectedRevision);
         break;
+      case 'syncProfile':
+        result = syncProfile_(body.profile, body.revision, body.updatedAt);
+        break;
       default:
         throw apiError_('bad_request', '未知的 action');
     }
@@ -161,6 +164,45 @@ function saveProfile_(profile, expectedRevision) {
       revision,
       updatedAt,
     ]]);
+    return { profile: profileRecord_(profile, revision, updatedAt) };
+  });
+}
+
+function syncProfile_(profile, sourceRevision, sourceUpdatedAt) {
+  if (!profile || !profile.playerId) throw apiError_('bad_request', '玩家資料不完整');
+
+  const revision = Number(sourceRevision);
+  if (!revision || revision < 1) {
+    throw apiError_('bad_request', '玩家資料版本不完整');
+  }
+
+  return withLock_(function () {
+    const sheet = profileSheet_();
+    const row = findRow_(sheet, 1, profile.playerId);
+
+    if (row) {
+      const currentRevision = Number(sheet.getRange(row, 3).getValue());
+      if (currentRevision >= revision) {
+        return { profile: profileFromRow_(sheet, row) };
+      }
+
+      const updatedAt = sourceUpdatedAt || new Date().toISOString();
+      sheet.getRange(row, 1, 1, PROFILE_HEADERS.length).setValues([[
+        profile.playerId,
+        JSON.stringify(profile),
+        revision,
+        updatedAt,
+      ]]);
+      return { profile: profileRecord_(profile, revision, updatedAt) };
+    }
+
+    const updatedAt = sourceUpdatedAt || new Date().toISOString();
+    sheet.appendRow([
+      profile.playerId,
+      JSON.stringify(profile),
+      revision,
+      updatedAt,
+    ]);
     return { profile: profileRecord_(profile, revision, updatedAt) };
   });
 }

@@ -53,6 +53,15 @@ export class AppsScriptGameStore {
     return result.profile;
   }
 
+  async syncProfile(profile, { revision, updatedAt } = {}) {
+    const result = await this.request('syncProfile', {
+      profile,
+      revision,
+      updatedAt,
+    });
+    return result.profile;
+  }
+
   async request(action, payload) {
     let response;
     try {

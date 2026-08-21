@@ -8,6 +8,43 @@ const ENVIRONMENT = Object.freeze({
   DISCORD_PUBLIC_KEY: 'test-public-key',
   APPS_SCRIPT_URL: 'https://script.google.com/test',
   APPS_SCRIPT_SECRET: 'test-secret',
+  DB: { prepare() {} },
+});
+
+test('Worker健康檢查會確認D1與Google鏡像設定', async () => {
+  const worker = createWorker({ verifyRequest: async () => true });
+  const response = await worker.fetch(
+    new Request('https://slotbattle.example/'),
+    ENVIRONMENT,
+    {},
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    ok: true,
+    service: 'slotbattle-discord-worker',
+    mode: 'http-interactions',
+    storage: 'd1',
+    profileMirror: 'google-sheets',
+  });
+});
+
+test('Worker健康檢查會明確列出缺少D1 binding', async () => {
+  const response = await createWorker().fetch(
+    new Request('https://slotbattle.example/'),
+    { ...ENVIRONMENT, DB: undefined },
+    {},
+  );
+
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), {
+    ok: false,
+    service: 'slotbattle-discord-worker',
+    mode: 'http-interactions',
+    storage: 'unavailable',
+    profileMirror: 'google-sheets',
+    missing: ['DB'],
+  });
 });
 
 test('Worker會拒絕未通過Discord簽章的請求', async () => {
@@ -105,6 +142,51 @@ test('開始指令會先延遲回應，再以Webhook更新遊戲面板', async (
   const payload = JSON.parse(calls[0].options.body);
   assert.equal(payload.embeds[0].title, '🎰 拉霸戰鬥｜第 1 回合');
   assert.equal(payload.components[0].components[0].type, 2);
+});
+
+test('Google背景同步不會延後Discord戰鬥面板', async () => {
+  const store = new MemoryGameStore();
+  const background = [];
+  let finishMirror;
+  const mirrorTask = new Promise((resolve) => {
+    finishMirror = resolve;
+  });
+  let webhookEdited;
+  const editSeen = new Promise((resolve) => {
+    webhookEdited = resolve;
+  });
+
+  const worker = createWorker({
+    verifyRequest: async () => true,
+    storeFactory: (environment, { enqueue }) => {
+      enqueue(mirrorTask);
+      return store;
+    },
+    fetchImpl: async () => {
+      webhookEdited();
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { 'content-type': 'application/json' },
+      });
+    },
+  });
+
+  const response = await worker.fetch(
+    interactionRequest(commandInteraction('start')),
+    ENVIRONMENT,
+    { waitUntil: (promise) => background.push(promise) },
+  );
+  assert.equal((await response.json()).type, 5);
+
+  await editSeen;
+  let finished = false;
+  background[0].then(() => {
+    finished = true;
+  });
+  await Promise.resolve();
+  assert.equal(finished, false);
+
+  finishMirror();
+  await Promise.all(background);
 });
 
 test('按鈕互動會先確認，再更新原本的戰鬥訊息', async () => {
