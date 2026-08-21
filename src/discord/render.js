@@ -1,10 +1,3 @@
-import {
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-  EmbedBuilder,
-} from 'discord.js';
-
 import { DEFAULT_CONFIG } from '../game/config.js';
 import { getItem } from '../game/data/items.js';
 import { getSkill } from '../game/data/skills.js';
@@ -19,12 +12,24 @@ const COLORS = Object.freeze({
   abandoned: 0x747f8d,
 });
 
+const COMPONENT_TYPE = Object.freeze({
+  ACTION_ROW: 1,
+  BUTTON: 2,
+});
+
+const BUTTON_STYLE = Object.freeze({
+  PRIMARY: 1,
+  SECONDARY: 2,
+  SUCCESS: 3,
+  DANGER: 4,
+});
+
 export function renderGame(state) {
-  const embed = new EmbedBuilder()
-    .setColor(COLORS[state.status] ?? COLORS.active)
-    .setTitle(titleFor(state))
-    .setDescription(descriptionFor(state))
-    .addFields(
+  const embed = {
+    color: COLORS[state.status] ?? COLORS.active,
+    title: titleFor(state),
+    description: descriptionFor(state),
+    fields: [
       {
         name: `👤 玩家 HP　${state.player.hp}/${state.player.maxHp}`,
         value: healthBar(state.player.hp, state.player.maxHp, '🟩'),
@@ -40,22 +45,23 @@ export function renderGame(state) {
         value: resourceLine(state),
         inline: false,
       },
-    )
-    .setFooter({ text: '行動點與所有指令點都不會保留到下一回合' });
+    ],
+    footer: { text: '行動點與所有指令點都不會保留到下一回合' },
+  };
 
   const lastSpin = lastSpinText(state);
   if (lastSpin) {
-    embed.addFields({ name: '🎰 最近一次拉霸', value: lastSpin, inline: false });
+    embed.fields.push({ name: '🎰 最近一次拉霸', value: lastSpin, inline: false });
   }
 
   const lastResolution = lastResolutionText(state);
   if (lastResolution) {
-    embed.addFields({ name: '📜 上回合結算', value: lastResolution, inline: false });
+    embed.fields.push({ name: '📜 上回合結算', value: lastResolution, inline: false });
   }
 
   const statusText = activeStatusText(state);
   if (statusText) {
-    embed.addFields({ name: '狀態', value: statusText, inline: false });
+    embed.fields.push({ name: '狀態', value: statusText, inline: false });
   }
 
   return {
@@ -73,11 +79,11 @@ export function renderProfile(profileRecord) {
   const loadoutItems = profile.lastStartingLoadout?.itemIds
     ?.map((id) => getItem(id).name) ?? [];
 
-  const embed = new EmbedBuilder()
-    .setColor(COLORS.active)
-    .setTitle('🧭 Roguelike 玩家資料')
-    .setDescription('永久資料只影響開局選擇；冒險中的生命與道具會在該次冒險結束後清除。')
-    .addFields(
+  const embed = {
+    color: COLORS.active,
+    title: '🧭 Roguelike 玩家資料',
+    description: '永久資料只影響開局選擇；冒險中的生命與道具會在該次冒險結束後清除。',
+    fields: [
       {
         name: `技能欄位　${profile.startingSkillSlots}`,
         value: loadoutSkills.length ? loadoutSkills.join('、') : '尚未選擇',
@@ -98,17 +104,18 @@ export function renderProfile(profileRecord) {
         value: items.join('、') || '無',
         inline: false,
       },
-    )
-    .setFooter({ text: `存檔版本 ${profile.saveVersion}` });
+    ],
+    footer: { text: `存檔版本 ${profile.saveVersion}` },
+  };
 
   return { embeds: [embed] };
 }
 
 export function renderRules() {
-  const embed = new EmbedBuilder()
-    .setColor(COLORS.active)
-    .setTitle('🎰 拉霸戰鬥規則')
-    .setDescription([
+  const embed = {
+    color: COLORS.active,
+    title: '🎰 拉霸戰鬥規則',
+    description: [
       `每回合取得 **${DEFAULT_CONFIG.actionPointsPerRound}點行動點**，最多拉霸 **${DEFAULT_CONFIG.maxSpinsPerRound}次**。你可以分批投入，也可以一次全押。`,
       '',
       '每格機率：⚔️攻擊30%／🛡️防禦30%／✨技能30%／🍀幸運5%／💀不幸5%。',
@@ -120,7 +127,8 @@ export function renderRules() {
       `⚔️每點造成1傷害；🛡️每點抵銷1傷害；✨${DEFAULT_CONFIG.commands.skill.description}`,
       '',
       '所有行動點與指令點都只在當回合有效。',
-    ].join('\n'));
+    ].join('\n'),
+  };
 
   return { embeds: [embed] };
 }
@@ -128,54 +136,77 @@ export function renderRules() {
 function buildControls(state) {
   if (state.status !== GameStatus.ACTIVE) {
     return [
-      new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId(customId(state.id, 'restart'))
-          .setLabel('再來一場')
-          .setEmoji('🔄')
-          .setStyle(ButtonStyle.Primary),
-      ),
+      actionRow([
+        button({
+          customId: customId(state.id, 'restart'),
+          label: '再來一場',
+          emoji: '🔄',
+          style: BUTTON_STYLE.PRIMARY,
+        }),
+      ]),
     ];
   }
 
   const action = state.resources.action;
   const noSpinsLeft = state.spinsUsed >= state.config.maxSpinsPerRound;
 
-  const wagerRow = new ActionRowBuilder().addComponents(
+  const wagerRow = actionRow([
     wagerButton(state.id, 1, action < 1 || noSpinsLeft),
     wagerButton(state.id, 2, action < 2 || noSpinsLeft),
     wagerButton(state.id, 3, action < 3 || noSpinsLeft),
-    new ButtonBuilder()
-      .setCustomId(customId(state.id, 'bet', 'all'))
-      .setLabel(`全部投入（${action}）`)
-      .setEmoji('🔥')
-      .setStyle(ButtonStyle.Primary)
-      .setDisabled(action < 1 || noSpinsLeft),
-  );
+    button({
+      customId: customId(state.id, 'bet', 'all'),
+      label: `全部投入（${action}）`,
+      emoji: '🔥',
+      style: BUTTON_STYLE.PRIMARY,
+      disabled: action < 1 || noSpinsLeft,
+    }),
+  ]);
 
-  const utilityRow = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId(customId(state.id, 'end'))
-      .setLabel('結束抽選')
-      .setEmoji('⏹️')
-      .setStyle(ButtonStyle.Success),
-    new ButtonBuilder()
-      .setCustomId(customId(state.id, 'abandon'))
-      .setLabel('放棄戰鬥')
-      .setEmoji('🏳️')
-      .setStyle(ButtonStyle.Danger),
-  );
+  const utilityRow = actionRow([
+    button({
+      customId: customId(state.id, 'end'),
+      label: '結束抽選',
+      emoji: '⏹️',
+      style: BUTTON_STYLE.SUCCESS,
+    }),
+    button({
+      customId: customId(state.id, 'abandon'),
+      label: '放棄戰鬥',
+      emoji: '🏳️',
+      style: BUTTON_STYLE.DANGER,
+    }),
+  ]);
 
   return [wagerRow, utilityRow];
 }
 
 function wagerButton(gameId, wager, disabled) {
-  return new ButtonBuilder()
-    .setCustomId(customId(gameId, 'bet', String(wager)))
-    .setLabel(`投入${wager}點`)
-    .setEmoji('🎟️')
-    .setStyle(ButtonStyle.Secondary)
-    .setDisabled(disabled);
+  return button({
+    customId: customId(gameId, 'bet', String(wager)),
+    label: `投入${wager}點`,
+    emoji: '🎟️',
+    style: BUTTON_STYLE.SECONDARY,
+    disabled,
+  });
+}
+
+function actionRow(components) {
+  return {
+    type: COMPONENT_TYPE.ACTION_ROW,
+    components,
+  };
+}
+
+function button({ customId, label, emoji, style, disabled = false }) {
+  return {
+    type: COMPONENT_TYPE.BUTTON,
+    custom_id: customId,
+    label,
+    emoji: { name: emoji },
+    style,
+    disabled,
+  };
 }
 
 function customId(gameId, action, value) {

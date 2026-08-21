@@ -23,4 +23,5 @@ jobs:
       - run: npm test
       - run: npm run validate-data
       - run: npm run simulate -- 1000
+      - run: npm run worker:check
       - run: docker build --tag slotbattle-bot:ci .

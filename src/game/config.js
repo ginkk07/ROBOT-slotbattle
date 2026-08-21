@@ -40,7 +40,6 @@ function buildConfig(overrides = {}) {
     rank: bossUnit.rank,
     tags: [...bossUnit.tags],
     maxHp: bossUnit.stats.maxHp,
-    attackPattern: [...bossUnit.attackPattern],
     skillIds: [...bossUnit.skillIds],
     damageResistances: { ...bossUnit.damageResistances },
     statusOverrides: structuredClone(bossUnit.statusOverrides),

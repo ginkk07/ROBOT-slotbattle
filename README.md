@@ -2,6 +2,8 @@
 
 以「投入行動點拉霸，產生攻擊／防禦／技能指令點」為核心的單人 Boss 戰機器人。目前保留原型的戰鬥規則，同時把資料、規則、Discord 畫面與存檔拆成獨立模組，作為後續 Roguelike 內容的基礎。
 
+正式部署使用 **Discord HTTP Interactions + Cloudflare Workers 免費版**；不需要常駐主機或一直開著個人電腦。Google Apps Script／試算表負責保存玩家與戰鬥資料。原本的 Discord Gateway 啟動方式仍保留作為本機備用。
+
 ## 目前可以遊玩的內容
 
 - `/slotbattle start`：開始戰鬥；若已有進行中的戰鬥，會直接重新顯示。
@@ -31,7 +33,31 @@
 
 目前初始道具已寫入玩家與戰鬥資料，但「戰鬥中使用道具是否消耗行動點」尚未定案，因此 Discord 面板暫時不顯示使用按鈕。
 
-## 安裝與啟動
+## 免費部署到 Cloudflare Workers
+
+完整圖文欄位與驗證順序請依照 [`docs/cloudflare-workers.md`](docs/cloudflare-workers.md)。
+
+部署後的資料流：
+
+```text
+Discord 指令／按鈕
+    → Cloudflare Worker（驗證簽章與執行遊戲）
+    → Google Apps Script
+    → Google 試算表
+    → Cloudflare Worker 更新 Discord 訊息
+```
+
+Worker 執行時只需要三個 Cloudflare Secrets：
+
+```text
+DISCORD_PUBLIC_KEY
+APPS_SCRIPT_URL
+APPS_SCRIPT_SECRET
+```
+
+Bot Token 不放在 Worker；它只用於註冊斜線指令。專案提供手動執行的 GitHub Actions 工作流程 `Register Discord Commands`，可避免在個人電腦安裝與執行 Node.js。
+
+## 本機 Gateway 備用模式
 
 需求：Node.js 24.17.0 以上、Discord Application、Bot Token 與測試伺服器。
 
@@ -59,7 +85,7 @@ npm run register
 npm start
 ```
 
-測試期建議填入 `DISCORD_GUILD_ID`；留空會註冊為全域指令，顯示更新可能需要等待。
+測試期建議填入 `DISCORD_GUILD_ID`；留空會註冊為全域指令，顯示更新可能需要等待。Cloudflare 正式版本不需要執行 `npm start`。
 
 ## 玩家存檔
 
@@ -79,31 +105,6 @@ APPS_SCRIPT_SECRET=伺服器端密鑰
 - 進行中的完整戰鬥狀態。
 - `revision` 版本號，避免連點或多實例互相覆蓋。
 
-## 部署到 Google Cloud Run
-
-專案包含 `Dockerfile` 與 HTTP 健康檢查。這個版本使用 Discord Gateway 長連線，因此 Cloud Run 必須維持單一常駐實例，並讓 CPU 在請求之外繼續運作。可參考 [Cloud Run 的 WebSocket 說明](https://cloud.google.com/run/docs/triggering/websockets) 與 [Instance-based billing 設定](https://cloud.google.com/run/docs/configuring/billing-settings)。
-
-建議設定：
-
-- 最小實例：1
-- 最大實例：1
-- Instance-based billing／CPU 不節流
-- Discord Token 與 Apps Script Secret 放在 Secret Manager
-- 區域可選 `asia-east1`（台灣）
-
-部署來源碼的基本指令：
-
-```bash
-gcloud run deploy slotbattle-bot \
-  --source . \
-  --region asia-east1 \
-  --min 1 \
-  --max 1 \
-  --no-cpu-throttling
-```
-
-部署後仍需在 Cloud Run 設定必要環境變數與密鑰。服務根路徑回傳存活狀態，`/readyz` 則在 Discord 登入完成後回傳 200。
-
 ## 測試與平衡
 
 ```bash
@@ -111,6 +112,7 @@ npm test
 npm run validate-data
 npm run simulate
 npm run simulate -- 100000
+npm run worker:check
 ```
 
 測試涵蓋拉霸全部 125 種排列、回合結算、資料引用、Boss 狀態規則、共用效果、菁英遭遇、掉落與存檔版本衝突。GitHub Actions 會在 Push 與 Pull Request 時自動執行測試、資料驗證及短版模擬。
@@ -123,10 +125,12 @@ npm run simulate -- 100000
 src/game/data/       單位、技能、狀態、道具、事件、遭遇、掉落
 src/game/engines/    共用效果、狀態、抽選、事件與掉落引擎
 src/game/            拉霸、計分與目前 Boss 戰流程
-src/discord/         指令定義與 Discord 訊息畫面
+src/discord/         指令、共用控制器、Discord 訊息與 Webhook 回覆
+src/worker.js        Cloudflare Workers HTTP Interactions 入口
 src/player/          永久玩家資料格式
 src/persistence/     記憶體／Apps Script 存檔介面
 apps-script/         Google 試算表 Web App
+docs/                Cloudflare 部署操作說明
 scripts/             指令註冊、模擬與資料驗證
 test/                自動測試
 ```
