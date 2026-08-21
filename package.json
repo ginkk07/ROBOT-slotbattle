@@ -1,6 +1,6 @@
 {
   "name": "discord-slot-battle",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "Discord 單人拉霸 Boss 戰可玩原型",
@@ -11,6 +11,7 @@
     "start": "node --env-file-if-exists=.env src/bot.js",
     "register": "node --env-file-if-exists=.env scripts/register-commands.js",
     "test": "node --test",
+    "validate-data": "node scripts/validate-data.js",
     "simulate": "node scripts/simulate.js"
   },
   "dependencies": {

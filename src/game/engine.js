@@ -1,4 +1,8 @@
 import { createConfig } from './config.js';
+import { getItem } from './data/items.js';
+import { getSkill } from './data/skills.js';
+import { getUnit } from './data/units.js';
+import { applyEffects } from './engines/effects.js';
 import { drawReels } from './random.js';
 import { scoreSpin } from './scoring.js';
 
@@ -9,12 +13,31 @@ export const GameStatus = Object.freeze({
   ABANDONED: 'abandoned',
 });
 
-export function createGame({ id, ownerId, config: configOverrides } = {}) {
+export function createGame({
+  id,
+  ownerId,
+  config: configOverrides,
+  loadout,
+} = {}) {
   if (!id || !ownerId) {
     throw new TypeError('建立遊戲需要 id 與 ownerId');
   }
 
-  const config = createConfig(configOverrides);
+  const selectedSkillId = loadout?.skillIds?.[0];
+  const config = createConfig({
+    ...configOverrides,
+    ...(selectedSkillId ? { skillId: selectedSkillId } : {}),
+  });
+  const playerUnit = getUnit(config.playerUnitId);
+  const skillIds = loadout?.skillIds?.length
+    ? [...loadout.skillIds]
+    : [config.commands.skill.id];
+  for (const skillId of skillIds) getSkill(skillId);
+  const inventory = createStartingInventory(loadout?.itemIds ?? []);
+  const initialLoadout = {
+    skillIds: [...skillIds],
+    itemIds: [...(loadout?.itemIds ?? [])],
+  };
 
   return {
     id,
@@ -23,14 +46,33 @@ export function createGame({ id, ownerId, config: configOverrides } = {}) {
     phase: 'betting',
     round: 1,
     config,
+    initialLoadout,
     player: {
+      unitId: playerUnit.id,
+      name: playerUnit.name,
+      rank: playerUnit.rank,
+      tags: [...playerUnit.tags],
       hp: config.playerMaxHp,
       maxHp: config.playerMaxHp,
+      skillIds,
+      equippedSkillId: config.commands.skill.id,
+      inventory,
+      damageResistances: { ...playerUnit.damageResistances },
+      statusOverrides: structuredClone(playerUnit.statusOverrides),
+      activeStatuses: [],
     },
     boss: {
+      unitId: config.boss.unitId,
       name: config.boss.name,
+      rank: config.boss.rank,
+      tags: [...config.boss.tags],
       hp: config.boss.maxHp,
       maxHp: config.boss.maxHp,
+      skillIds: [...config.boss.skillIds],
+      damageResistances: { ...config.boss.damageResistances },
+      statusOverrides: structuredClone(config.boss.statusOverrides),
+      activeStatuses: [],
+      lootTableId: config.boss.lootTableId,
     },
     resources: {
       action: config.actionPointsPerRound,
@@ -112,15 +154,24 @@ export function resolveRound(state) {
 
   let healing = 0;
   let attackDamage = 0;
+  let skillDamage = 0;
+  let skillEvents = [];
   let defense = 0;
 
   if (!next.stunned) {
-    const missingHp = next.player.maxHp - next.player.hp;
-    healing = Math.min(
-      missingHp,
-      before.skill * next.config.commands.skill.healPerPoint,
-    );
-    next.player.hp += healing;
+    if (before.skill > 0) {
+      const skillResult = applyEffects({
+        effects: next.config.commands.skill.effects,
+        source: next.player,
+        target: next.boss,
+        points: before.skill,
+      });
+      next.player = skillResult.source;
+      next.boss = skillResult.target;
+      skillEvents = skillResult.events;
+      healing = sumEventAmount(skillEvents, 'heal');
+      skillDamage = sumEventAmount(skillEvents, 'damage');
+    }
 
     attackDamage = Math.min(
       next.boss.hp,
@@ -147,6 +198,8 @@ export function resolveRound(state) {
       skill: before.skill,
     },
     attackDamage,
+    skillDamage,
+    skillEvents,
     healing,
     defense,
     bossAttack: next.boss.hp === 0 ? 0 : bossAttack,
@@ -198,4 +251,20 @@ function clearRoundResources(state) {
   state.resources.attack = 0;
   state.resources.defense = 0;
   state.resources.skill = 0;
+}
+
+function sumEventAmount(events, type) {
+  return events
+    .filter((event) => event.type === type)
+    .reduce((total, event) => total + event.amount, 0);
+}
+
+function createStartingInventory(itemIds) {
+  const quantities = new Map();
+  for (const itemId of itemIds) {
+    getItem(itemId);
+    quantities.set(itemId, (quantities.get(itemId) ?? 0) + 1);
+  }
+
+  return [...quantities].map(([itemId, quantity]) => ({ itemId, quantity }));
 }

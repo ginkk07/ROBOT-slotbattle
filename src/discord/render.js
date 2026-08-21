@@ -6,6 +6,9 @@ import {
 } from 'discord.js';
 
 import { DEFAULT_CONFIG } from '../game/config.js';
+import { getItem } from '../game/data/items.js';
+import { getSkill } from '../game/data/skills.js';
+import { getStatus } from '../game/data/statuses.js';
 import { GameStatus, getBossIntent } from '../game/engine.js';
 import { formatReels } from '../game/symbols.js';
 
@@ -28,7 +31,7 @@ export function renderGame(state) {
         inline: false,
       },
       {
-        name: `👹 ${state.boss.name} HP　${state.boss.hp}/${state.boss.maxHp}`,
+        name: `👹 ${rankLabel(state.boss.rank)}${state.boss.name} HP　${state.boss.hp}/${state.boss.maxHp}`,
         value: healthBar(state.boss.hp, state.boss.maxHp, '🟥'),
         inline: false,
       },
@@ -50,10 +53,55 @@ export function renderGame(state) {
     embed.addFields({ name: '📜 上回合結算', value: lastResolution, inline: false });
   }
 
+  const statusText = activeStatusText(state);
+  if (statusText) {
+    embed.addFields({ name: '狀態', value: statusText, inline: false });
+  }
+
   return {
     embeds: [embed],
     components: buildControls(state),
   };
+}
+
+export function renderProfile(profileRecord) {
+  const profile = profileRecord.profile ?? profileRecord;
+  const skills = profile.unlockedStartingSkillIds.map((id) => getSkill(id).name);
+  const items = profile.unlockedStartingItemIds.map((id) => getItem(id).name);
+  const loadoutSkills = profile.lastStartingLoadout?.skillIds
+    ?.map((id) => getSkill(id).name) ?? [];
+  const loadoutItems = profile.lastStartingLoadout?.itemIds
+    ?.map((id) => getItem(id).name) ?? [];
+
+  const embed = new EmbedBuilder()
+    .setColor(COLORS.active)
+    .setTitle('🧭 Roguelike 玩家資料')
+    .setDescription('永久資料只影響開局選擇；冒險中的生命與道具會在該次冒險結束後清除。')
+    .addFields(
+      {
+        name: `技能欄位　${profile.startingSkillSlots}`,
+        value: loadoutSkills.length ? loadoutSkills.join('、') : '尚未選擇',
+        inline: true,
+      },
+      {
+        name: `道具欄位　${profile.startingItemSlots}`,
+        value: loadoutItems.length ? loadoutItems.join('、') : '尚未選擇',
+        inline: true,
+      },
+      {
+        name: '已解鎖初始技能',
+        value: skills.join('、') || '無',
+        inline: false,
+      },
+      {
+        name: '已解鎖初始道具',
+        value: items.join('、') || '無',
+        inline: false,
+      },
+    )
+    .setFooter({ text: `存檔版本 ${profile.saveVersion}` });
+
+  return { embeds: [embed] };
 }
 
 export function renderRules() {
@@ -69,7 +117,7 @@ export function renderRules() {
       '',
       '🍀幸運會將相同的基礎值同時加到攻擊、防禦、技能。三個💀會讓玩家本回合暈眩，所有資源消失並承受Boss完整攻擊。',
       '',
-      '⚔️每點造成1傷害；🛡️每點抵銷1傷害；✨預設技能為生命回復，每點恢復2生命。',
+      `⚔️每點造成1傷害；🛡️每點抵銷1傷害；✨${DEFAULT_CONFIG.commands.skill.description}`,
       '',
       '所有行動點與指令點都只在當回合有效。',
     ].join('\n'));
@@ -165,7 +213,7 @@ function resourceLine(state) {
     `🎟️ 行動 **${state.resources.action}**`,
     `⚔️ 攻擊 **${state.resources.attack}**`,
     `🛡️ 防禦 **${state.resources.defense}**`,
-    `✨ 技能 **${state.resources.skill}**`,
+    `✨ ${state.config.commands.skill.name} **${state.resources.skill}**`,
   ].join('　');
 }
 
@@ -196,9 +244,32 @@ function lastResolutionText(state) {
     : '';
 
   return [
-    `造成 **${result.attackDamage}** 傷害；恢復 **${result.healing}** 生命。`,
+    `造成 **${result.attackDamage + (result.skillDamage ?? 0)}** 傷害；恢復 **${result.healing}** 生命。`,
     `防禦 **${result.defense}**／Boss攻擊 **${result.bossAttack}**／受到 **${result.damageTaken}** 傷害${discarded}。`,
   ].join('\n');
+}
+
+function activeStatusText(state) {
+  const sides = [
+    ['玩家', state.player.activeStatuses],
+    [state.boss.name, state.boss.activeStatuses],
+  ];
+  const lines = sides.flatMap(([label, statuses]) => {
+    if (!statuses?.length) return [];
+    const text = statuses.map((status) => {
+      const definition = getStatus(status.statusId);
+      return `${definition.emoji}${definition.name}×${status.stacks}（${status.remainingTurns}回合）`;
+    }).join('、');
+    return `${label}：${text}`;
+  });
+
+  return lines.length ? lines.join('\n') : null;
+}
+
+function rankLabel(rank) {
+  if (rank === 'boss') return '【BOSS】';
+  if (rank === 'elite') return '【菁英】';
+  return '';
 }
 
 function healthBar(current, maximum, filledEmoji) {
