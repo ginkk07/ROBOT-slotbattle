@@ -2,7 +2,7 @@
 
 以「投入行動點拉霸，產生攻擊／防禦／技能指令點」為核心的單人 Boss 戰機器人。目前保留原型的戰鬥規則，同時把資料、規則、Discord 畫面與存檔拆成獨立模組，作為後續 Roguelike 內容的基礎。
 
-正式部署使用 **Discord HTTP Interactions + Cloudflare Workers 免費版**；不需要常駐主機或一直開著個人電腦。Google Apps Script／試算表負責保存玩家與戰鬥資料。原本的 Discord Gateway 啟動方式仍保留作為本機備用。
+正式部署使用 **Discord HTTP Interactions + Cloudflare Workers 免費版**；不需要常駐主機或一直開著個人電腦。Cloudflare D1 負責即時戰鬥與玩家資料，Google Apps Script／試算表在背景保存玩家永久資料副本。原本的 Discord Gateway 啟動方式仍保留作為本機備用。
 
 ## 目前可以遊玩的內容
 
@@ -42,12 +42,12 @@
 ```text
 Discord 指令／按鈕
     → Cloudflare Worker（驗證簽章與執行遊戲）
-    → Google Apps Script
-    → Google 試算表
+    → Cloudflare D1（即時讀寫）
     → Cloudflare Worker 更新 Discord 訊息
+    → Google Apps Script／試算表（背景同步玩家永久資料）
 ```
 
-Worker 執行時只需要三個 Cloudflare Secrets：
+Worker 執行時需要一個 D1 binding `DB`，以及三個 Cloudflare Secrets：
 
 ```text
 DISCORD_PUBLIC_KEY
@@ -91,6 +91,13 @@ npm start
 
 未設定 Google 存檔時，機器人使用記憶體模式，重啟後戰鬥會消失。
 
+Cloudflare 正式版使用 D1 的兩張資料表：
+
+- `slotbattle_sessions`：即時戰鬥狀態與版本號。
+- `slotbattle_profiles`：玩家永久資料與版本號。
+
+資料表定義在 `migrations/0001_initial.sql`。D1 讓 Discord 操作不必等待 Google 試算表；Apps Script 只在背景把新建或更新後的玩家資料同步到 `slotbattle_profiles` 工作表。
+
 要啟用 Google 試算表，依照 [`apps-script/README.md`](apps-script/README.md) 部署 `Code.gs`，再設定：
 
 ```env
@@ -98,12 +105,11 @@ APPS_SCRIPT_URL=https://script.google.com/macros/s/.../exec
 APPS_SCRIPT_SECRET=伺服器端密鑰
 ```
 
-試算表會保存：
+Google 試算表會保存：
 
 - Discord 玩家 ID 與永久解鎖資料。
 - 初始技能／道具欄位與最後開局配置。
-- 進行中的完整戰鬥狀態。
-- `revision` 版本號，避免連點或多實例互相覆蓋。
+- D1 的 `revision` 版本號；較舊的背景請求不會覆蓋新版資料。
 
 ## 測試與平衡
 
@@ -128,7 +134,8 @@ src/game/            拉霸、計分與目前 Boss 戰流程
 src/discord/         指令、共用控制器、Discord 訊息與 Webhook 回覆
 src/worker.js        Cloudflare Workers HTTP Interactions 入口
 src/player/          永久玩家資料格式
-src/persistence/     記憶體／Apps Script 存檔介面
+src/persistence/     D1／Google鏡像／記憶體存檔介面
+migrations/          Cloudflare D1資料表遷移
 apps-script/         Google 試算表 Web App
 docs/                Cloudflare 部署操作說明
 scripts/             指令註冊、模擬與資料驗證

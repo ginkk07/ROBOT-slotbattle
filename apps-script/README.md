@@ -1,6 +1,6 @@
 # Google 試算表存檔設定
 
-這個 Apps Script 只負責玩家永久資料與進行中戰鬥。Discord Bot Token 不應放進 Apps Script，也不要放進試算表。
+Cloudflare 正式版使用 D1 即時讀寫；這個 Apps Script 只負責把玩家永久資料背景同步到 Google 試算表。舊版與本機 Gateway 所需的戰鬥存檔函式仍保留。Discord Bot Token 不應放進 Apps Script，也不要放進試算表。
 
 ## 1. 建立試算表與 Apps Script
 
@@ -28,11 +28,11 @@ APPS_SCRIPT_URL=https://script.google.com/macros/s/.../exec
 APPS_SCRIPT_SECRET=與API_SECRET完全相同的字串
 ```
 
-只要其中一個環境變數缺少，機器人會拒絕啟動，避免誤以為資料已經寫入 Google。
+只要其中一個環境變數缺少，Worker 健康檢查會列出缺少項目，避免誤以為資料已經寫入 Google。
 
 ## 安全注意事項
 
 - `API_SECRET`、`APPS_SCRIPT_SECRET`、Discord Bot Token 都不可提交到 Git。
 - 不要沿用前端網頁中的公開雜湊鹽；Discord 機器人是伺服器程式，可以安全地把密鑰放在環境變數。
-- 每次寫入都會檢查 `revision`，並使用 `LockService` 避免重複點擊互相覆蓋。
+- D1 的 `revision` 會一起傳入；Apps Script 只接受較新的玩家版本，並使用 `LockService` 避免背景請求互相覆蓋。
 - 修改 `Code.gs` 後，必須建立新部署版本，既有 `/exec` 網址才會執行新版。

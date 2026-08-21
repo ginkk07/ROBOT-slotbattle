@@ -1,6 +1,6 @@
 # Cloudflare Workers 免費部署步驟
 
-這個版本透過 Discord HTTP Interactions 接收斜線指令與按鈕，因此不需要 24 小時常駐主機。戰鬥與永久玩家資料仍由既有 Google Apps Script／Google 試算表保存。
+這個版本透過 Discord HTTP Interactions 接收斜線指令與按鈕，因此不需要 24 小時常駐主機。Cloudflare D1 負責快速保存戰鬥與玩家資料，Google Apps Script／Google 試算表只在背景保存玩家永久資料副本。
 
 > Bot Token、Apps Script Secret 都不要貼在聊天、程式碼、README 或 Cloudflare 一般文字變數中。
 
@@ -14,8 +14,17 @@
 | `DISCORD_TOKEN` | Discord Developer Portal → Bot | GitHub Actions Secret，只用於註冊指令 |
 | `DISCORD_CLIENT_ID` | Discord Application ID | GitHub Actions Secret |
 | `DISCORD_GUILD_ID` | Discord 測試伺服器 ID | GitHub Actions Secret |
+| `DB` | Cloudflare D1 的 `slotbattle-data` | Worker D1 binding（由 `wrangler.jsonc` 設定） |
 
-## 一、從 GitHub 建立 Worker
+## 一、建立 D1 資料庫與資料表
+
+1. 在 Cloudflare Dashboard 進入 **Storage & databases → D1 SQL database**。
+2. 建立資料庫，名稱填入 `slotbattle-data`。
+3. 將資料庫 ID 填入 `wrangler.jsonc` 的 `database_id`。
+4. 進入資料庫的 **Console**，執行 `migrations/0001_initial.sql` 的完整內容。
+5. 回到 Overview，確認 **Number of Tables** 顯示 `2`。
+
+## 二、從 GitHub 建立 Worker
 
 1. 登入 [Cloudflare Dashboard](https://dash.cloudflare.com/)。
 2. 進入 **Workers & Pages**。
@@ -37,7 +46,7 @@
 
 第一次部署後如果顯示尚未設定密鑰屬於正常現象，下一節補上即可。
 
-## 二、加入 Worker 執行密鑰
+## 三、加入 Worker 執行密鑰
 
 1. 打開剛建立的 `slotbattle-discord-bot`。
 2. 進入 **Settings** → **Variables and Secrets**。
@@ -58,13 +67,15 @@ APPS_SCRIPT_SECRET
 {
   "ok": true,
   "service": "slotbattle-discord-worker",
-  "mode": "http-interactions"
+  "mode": "http-interactions",
+  "storage": "d1",
+  "profileMirror": "google-sheets"
 }
 ```
 
 若 `ok` 是 `false`，回傳內容只會列出缺少的變數名稱，不會顯示密鑰值。
 
-## 三、連接 Discord Interactions Endpoint
+## 四、連接 Discord Interactions Endpoint
 
 1. 打開 [Discord Developer Portal](https://discord.com/developers/applications)。
 2. 選擇拉霸戰鬥的 Application。
@@ -79,7 +90,7 @@ https://slotbattle-discord-bot.<帳號>.workers.dev/interactions
 
 Discord 會傳送簽章驗證與 `PING`；能成功儲存即代表 Worker 端點有效。設定 HTTP Endpoint 後，Discord 不會再用原本 Gateway 連線傳送這些互動。
 
-## 四、使用 GitHub Actions 註冊斜線指令
+## 五、使用 GitHub Actions 註冊斜線指令
 
 這一步不需要把 Bot Token 放進 Cloudflare。
 
@@ -107,7 +118,7 @@ DISCORD_GUILD_ID
 /slotbattle rules
 ```
 
-## 五、實際驗證
+## 六、實際驗證
 
 建議依序測試：
 
@@ -115,8 +126,9 @@ DISCORD_GUILD_ID
 2. `/slotbattle start` 是否建立戰鬥面板。
 3. 點擊「投入1點」是否更新拉霸結果。
 4. `/slotbattle resume` 是否能重新顯示進行中的戰鬥。
-5. `/slotbattle profile` 是否能讀到 Google 試算表玩家資料。
-6. 查看 Google 試算表的 `profiles` 與 `sessions` 是否新增 Discord 玩家 ID。
+5. `/slotbattle profile` 是否能立即顯示玩家資料。
+6. 查看 D1 的 `slotbattle_profiles` 與 `slotbattle_sessions` 是否新增資料。
+7. 稍候查看 Google 試算表的 `slotbattle_profiles` 是否新增 Discord 玩家 ID。
 
 ## 更新方式
 
@@ -126,7 +138,7 @@ Cloudflare 已連接 GitHub 後，`main` 每次有新提交都會自動重新建
 
 ### Discord 顯示「應用程式沒有回應」
 
-先打開 Worker 網址，確認 `ok` 是 `true`，再到 Cloudflare 的 **Observability / Logs** 查看錯誤。Apps Script 最長等待時間目前限制為 8 秒，Discord 會先顯示載入狀態，再由 Worker 更新訊息。
+先打開 Worker 網址，確認 `ok` 是 `true`、`storage` 是 `d1`，再到 Cloudflare 的 **Observability / Logs** 查看錯誤。Discord 的遊戲回覆只等待 D1；Google 同步逾時只會寫入 Log，不會讓指令一直停在載入狀態。
 
 ### Discord 不接受 Endpoint URL
 

@@ -11,7 +11,7 @@ import { DiscordInteractionWebhookClient } from './discord/webhook-client.js';
 import { createGameStore } from './persistence/game-store.js';
 
 const INTERACTION_PATHS = new Set(['/', '/interactions']);
-const REQUIRED_RUNTIME_VARIABLES = Object.freeze([
+const REQUIRED_STRING_VARIABLES = Object.freeze([
   'DISCORD_PUBLIC_KEY',
   'APPS_SCRIPT_URL',
   'APPS_SCRIPT_SECRET',
@@ -33,6 +33,10 @@ export function createWorker({
           ok: missing.length === 0,
           service: 'slotbattle-discord-worker',
           mode: 'http-interactions',
+          storage: env.DB ? 'd1' : 'unavailable',
+          profileMirror: (
+            env.APPS_SCRIPT_URL?.trim() && env.APPS_SCRIPT_SECRET?.trim()
+          ) ? 'google-sheets' : 'unavailable',
           ...(missing.length ? { missing } : {}),
         }, { status: missing.length ? 503 : 200 });
       }
@@ -169,9 +173,14 @@ async function processCommand({
   subcommand,
 }) {
   const webhook = webhookClientFor(interaction, fetchImpl);
+  const backgroundTasks = [];
 
   try {
-    const controller = controllerFactory({ store: storeFactory(env) });
+    const controller = controllerFactory({
+      store: storeFactory(env, {
+        enqueue: (task) => backgroundTasks.push(task),
+      }),
+    });
     const result = await controller.handleCommand({
       commandName,
       subcommand,
@@ -181,6 +190,8 @@ async function processCommand({
   } catch (error) {
     console.error('處理 Discord 指令失敗：', error);
     await safelyEditError(webhook, error);
+  } finally {
+    await Promise.allSettled(backgroundTasks);
   }
 }
 
@@ -192,9 +203,14 @@ async function processButton({
   fetchImpl,
 }) {
   const webhook = webhookClientFor(interaction, fetchImpl);
+  const backgroundTasks = [];
 
   try {
-    const controller = controllerFactory({ store: storeFactory(env) });
+    const controller = controllerFactory({
+      store: storeFactory(env, {
+        enqueue: (task) => backgroundTasks.push(task),
+      }),
+    });
     const result = await controller.handleButton({
       customId: interaction.data?.custom_id,
       userId: userIdFor(interaction),
@@ -211,6 +227,8 @@ async function processButton({
     } catch (reportError) {
       console.error('無法回報 Discord 按鈕錯誤：', reportError);
     }
+  } finally {
+    await Promise.allSettled(backgroundTasks);
   }
 }
 
@@ -244,7 +262,11 @@ function userIdFor(interaction) {
 }
 
 function missingRuntimeVariables(environment) {
-  return REQUIRED_RUNTIME_VARIABLES.filter((name) => !environment[name]?.trim());
+  const missing = REQUIRED_STRING_VARIABLES.filter(
+    (name) => !environment[name]?.trim(),
+  );
+  if (!environment.DB) missing.push('DB');
+  return missing;
 }
 
 function schedule(context, promise) {
