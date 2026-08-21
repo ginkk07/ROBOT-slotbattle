@@ -61,6 +61,8 @@ APPS_SCRIPT_SECRET
 
 5. 選擇 **Deploy** 套用設定。
 
+`wrangler.jsonc` 已設定 `keep_vars: true`，後續 GitHub 自動部署會保留在 Dashboard 設定的變數與 Secret。
+
 開啟 Cloudflare 提供的 `https://slotbattle-discord-bot.<帳號>.workers.dev/` 網址，設定完成時應看到：
 
 ```json
