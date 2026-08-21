@@ -8,6 +8,7 @@ export const ITEMS = createCatalog([
     type: 'consumable',
     stackable: true,
     maxStack: 99,
+    actionCost: 0,
     description: '恢復10點生命。',
     effects: [
       { type: 'heal', amount: 10, target: 'self' },
@@ -20,6 +21,7 @@ export const ITEMS = createCatalog([
     type: 'consumable',
     stackable: true,
     maxStack: 20,
+    actionCost: 0,
     description: '造成8點火焰傷害，並附加燃燒。',
     effects: [
       { type: 'damage', element: 'fire', amount: 8, target: 'enemy' },
@@ -40,8 +42,17 @@ export const ITEMS = createCatalog([
     type: 'equipment',
     slot: 'weapon',
     stackable: false,
-    description: '裝備後，每次產生攻擊時額外造成4點物理傷害。',
-    statModifiers: { attack: 4 },
+    description: '戰鬥開始時獲得「攻擊力＋1」狀態，持續3回合。',
+    battleStartEffects: [
+      {
+        type: 'apply-status',
+        statusId: 'attack-up',
+        target: 'self',
+        chance: 1,
+        duration: 3,
+        potency: 1,
+      },
+    ],
   },
 ], '道具庫');
 

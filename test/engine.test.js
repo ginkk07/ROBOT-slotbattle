@@ -117,21 +117,48 @@ test('消耗品可在戰鬥中使用並從背包扣除', () => {
   state = useItem(state, 'healing-potion');
 
   assert.equal(state.player.hp, 45);
+  assert.equal(state.resources.action, 4);
   assert.deepEqual(state.player.inventory, []);
 });
 
-test('裝備在開局自動穿戴並加成每次有攻擊的拉霸', () => {
+test('燃焰之劍在戰鬥開始時取得可疊加的攻擊力狀態並持續3回合', () => {
   let state = createGame({
     id: 'equipment-test',
     ownerId: 'player-1',
+    config: {
+      playerMaxHp: 100,
+      boss: { maxHp: 100, attackPattern: [0] },
+    },
     loadout: { skillIds: ['life-recovery'], itemIds: ['flame-sword'] },
   });
-  state = placeBet(state, 1, { reels: [ATTACK, DEFENSE, SKILL] });
+  const attackUp = state.player.activeStatuses.find((status) => (
+    status.statusId === 'attack-up'
+  ));
 
   assert.equal(state.player.equipment.weapon, 'flame-sword');
   assert.deepEqual(state.player.inventory, []);
-  assert.equal(state.lastImpact.equipmentBonus, 4);
-  assert.equal(state.boss.hp, 55);
+  assert.deepEqual(attackUp, {
+    statusId: 'attack-up',
+    sourceUnitId: 'wanderer',
+    remainingTurns: 3,
+    stacks: 1,
+    potency: 1,
+  });
+
+  state = placeBet(state, 1, { reels: [ATTACK, DEFENSE, SKILL] });
+  assert.equal(state.lastImpact.equipmentBonus, 0);
+  assert.equal(state.lastImpact.statusBonus, 1);
+  assert.equal(state.boss.hp, 98);
+
+  state = endPlayerTurn(state);
+  assert.equal(state.player.activeStatuses[0].remainingTurns, 2);
+  state = endPlayerTurn(state);
+  assert.equal(state.player.activeStatuses[0].remainingTurns, 1);
+  state = endPlayerTurn(state);
+  assert.equal(
+    state.player.activeStatuses.some((status) => status.statusId === 'attack-up'),
+    false,
+  );
 });
 
 test('火焰炸彈沿用Boss抗性並在回合結束觸發燃燒', () => {

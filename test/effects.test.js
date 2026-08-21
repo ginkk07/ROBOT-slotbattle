@@ -89,3 +89,23 @@ test('可疊加狀態遵守最大層數', () => {
   assert.equal(merged[0].remainingTurns, 3);
   assert.equal(merged[0].potency, 2);
 });
+
+test('攻擊力加成狀態可以疊加並刷新持續回合', () => {
+  const current = [{
+    statusId: 'attack-up',
+    sourceUnitId: 'equipment',
+    remainingTurns: 2,
+    stacks: 1,
+    potency: 1,
+  }];
+  const merged = mergeActiveStatus(current, {
+    statusId: 'attack-up',
+    sourceUnitId: 'skill',
+    remainingTurns: 3,
+    stacks: 1,
+    potency: 1,
+  });
+
+  assert.equal(merged[0].stacks, 2);
+  assert.equal(merged[0].remainingTurns, 3);
+});

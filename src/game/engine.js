@@ -37,7 +37,7 @@ export function createGame({
   const selectedItemIds = [...(loadout?.itemIds ?? [])];
   const startingItems = createStartingItems(selectedItemIds);
 
-  return {
+  const state = {
     schemaVersion: GAME_STATE_VERSION,
     id,
     ownerId,
@@ -89,6 +89,9 @@ export function createGame({
     lastResolution: null,
     history: [],
   };
+
+  applyBattleStartEquipmentEffects(state);
+  return state;
 }
 
 export function getBossIntent(state) {
@@ -138,11 +141,9 @@ export function placeBet(state, wager, { reels, rng } = {}) {
     return next;
   }
 
-  const equipmentBonus = outcome.awarded.attack > 0
-    ? equipmentAttackBonus(next.player)
-    : 0;
+  const equipmentBonus = 0;
   const statusBonus = outcome.awarded.attack > 0
-    ? onAttackStatusBonus(next.player)
+    ? attackStatusBonus(next.player)
     : 0;
   const requestedAttack = outcome.awarded.attack + equipmentBonus + statusBonus;
   let attackDamage = 0;
@@ -234,6 +235,11 @@ export function useItem(state, itemId, { rng } = {}) {
   const item = getItem(itemId);
   if (item.type !== 'consumable') throw new Error('裝備會在開局時自動穿戴');
 
+  const actionCost = itemActionCost(item);
+  if (next.resources.action < actionCost) {
+    throw new RangeError(`使用${item.name}需要 ${actionCost} 點行動點`);
+  }
+
   const stack = next.player.inventory.find((entry) => entry.itemId === itemId);
   if (!stack || stack.quantity < 1) throw new Error(`已經沒有${item.name}`);
   if (wouldOnlyHealFullHealth(item, next.player)) {
@@ -248,6 +254,7 @@ export function useItem(state, itemId, { rng } = {}) {
   });
   next.player = result.source;
   next.boss = result.target;
+  next.resources.action -= actionCost;
   const nextStack = next.player.inventory.find((entry) => entry.itemId === itemId);
   nextStack.quantity -= 1;
   next.player.inventory = next.player.inventory.filter((entry) => entry.quantity > 0);
@@ -260,6 +267,7 @@ export function useItem(state, itemId, { rng } = {}) {
     type: 'item',
     round: next.round,
     itemId: item.id,
+    actionCost,
     events: result.events,
   });
 
@@ -453,23 +461,49 @@ function splitEquipmentFromInventory(inventory) {
   return { inventory: consumables, equipment };
 }
 
-function equipmentAttackBonus(player) {
-  return Object.values(player.equipment ?? {}).reduce((total, itemId) => {
+function applyBattleStartEquipmentEffects(state) {
+  for (const itemId of Object.values(state.player.equipment ?? {})) {
     const item = getItem(itemId);
-    return total + Number(item.statModifiers?.attack ?? 0);
-  }, 0);
+    if (!item.battleStartEffects?.length) continue;
+
+    const result = applyEffects({
+      effects: item.battleStartEffects,
+      source: state.player,
+      target: state.boss,
+    });
+    state.player = result.source;
+    state.boss = result.target;
+    state.history.push({
+      type: 'equipment-battle-start',
+      round: state.round,
+      itemId,
+      events: result.events,
+    });
+  }
 }
 
-function onAttackStatusBonus(player) {
+function attackStatusBonus(player) {
   return (player.activeStatuses ?? []).reduce((total, active) => {
     const definition = getStatus(active.statusId);
-    if (definition.trigger !== 'on-attack') return total;
+    const isAttackTrigger = definition.trigger === 'on-attack'
+      && definition.effect.type === 'bonus-damage';
+    const isAttackModifier = definition.effect.type === 'modify-stat'
+      && definition.effect.stat === 'attack';
+    if (!isAttackTrigger && !isAttackModifier) return total;
     return total + (
       Number(definition.effect.amountPerPotency ?? 0)
       * Number(active.potency ?? 1)
       * Number(active.stacks ?? 1)
     );
   }, 0);
+}
+
+function itemActionCost(item) {
+  const actionCost = item.actionCost ?? 0;
+  if (!Number.isInteger(actionCost) || actionCost < 0) {
+    throw new RangeError(`${item.name}的行動點成本必須是非負整數`);
+  }
+  return actionCost;
 }
 
 function resolveTurnEndStatuses(unit) {
@@ -535,9 +569,15 @@ function wouldOnlyRefreshActiveStatus(skill, player) {
     ?.filter((effect) => effect.type === 'apply-status' && effect.target === 'self')
     .map((effect) => effect.statusId) ?? [];
   return selfStatuses.length > 0
-    && selfStatuses.every((statusId) => (
-      player.activeStatuses?.some((status) => status.statusId === statusId)
-    ));
+    && selfStatuses.every((statusId) => {
+      const active = player.activeStatuses
+        ?.find((status) => status.statusId === statusId);
+      if (!active) return false;
+
+      const definition = getStatus(statusId);
+      if (definition.stacking.mode === 'refresh-duration') return true;
+      return Number(active.stacks ?? 1) >= definition.stacking.maxStacks;
+    });
 }
 
 function summarizeEffectEvents(events) {

@@ -209,9 +209,10 @@ function buildControls(state) {
   ];
 
   if (consumable) {
+    const actionCost = consumable.item.actionCost ?? 0;
     actionComponents.push(button({
       customId: gameCustomId(state.id, 'item', consumable.item.id),
-      label: `使用${consumable.item.name} ×${consumable.quantity}`,
+      label: `使用${consumable.item.name}${actionCost ? `（${actionCost}行動）` : ''} ×${consumable.quantity}`,
       emoji: consumable.item.emoji,
       style: BUTTON_STYLE.SECONDARY,
       disabled: stunned || itemUnavailable(state, consumable.item),
@@ -416,14 +417,23 @@ function skillUnavailable(state, skill) {
   const selfStatuses = skill.effects
     .filter((effect) => effect.type === 'apply-status' && effect.target === 'self')
     .map((effect) => effect.statusId);
-  return selfStatuses.length > 0 && selfStatuses.every((statusId) => (
-    state.player.activeStatuses?.some((active) => active.statusId === statusId)
-  ));
+  return selfStatuses.length > 0 && selfStatuses.every((statusId) => {
+    const active = state.player.activeStatuses
+      ?.find((status) => status.statusId === statusId);
+    if (!active) return false;
+
+    const definition = getStatus(statusId);
+    if (definition.stacking.mode === 'refresh-duration') return true;
+    return Number(active.stacks ?? 1) >= definition.stacking.maxStacks;
+  });
 }
 
 function itemUnavailable(state, item) {
-  return item.effects?.every((effect) => effect.type === 'heal' && effect.target === 'self')
+  const lacksAction = state.resources.action < (item.actionCost ?? 0);
+  const onlyHealsFullHealth = item.effects
+    ?.every((effect) => effect.type === 'heal' && effect.target === 'self')
     && state.player.hp >= state.player.maxHp;
+  return lacksAction || onlyHealsFullHealth;
 }
 
 function statusEventText(event) {

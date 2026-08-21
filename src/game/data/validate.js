@@ -22,13 +22,24 @@ export function validateGameData() {
   }
 
   for (const source of [...Object.values(SKILLS), ...Object.values(ITEMS)]) {
-    for (const effect of source.effects ?? []) {
+    const effects = [
+      ...(source.effects ?? []),
+      ...(source.battleStartEffects ?? []),
+    ];
+    for (const effect of effects) {
       if (effect.statusId) {
         checkReference(STATUSES, effect.statusId, `${source.id} 的效果`, errors);
       }
     }
     for (const skillId of source.passiveSkillIds ?? []) {
       checkReference(SKILLS, skillId, `道具 ${source.id} 的 passiveSkillIds`, errors);
+    }
+
+    if (
+      source.type === 'consumable'
+      && (!Number.isInteger(source.actionCost) || source.actionCost < 0)
+    ) {
+      errors.push(`消耗品 ${source.id} 的 actionCost 必須是非負整數`);
     }
   }
 

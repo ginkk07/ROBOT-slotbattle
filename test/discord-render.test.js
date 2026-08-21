@@ -77,6 +77,10 @@ test('裝備在面板顯示為已穿戴而不是使用按鈕', () => {
   ));
 
   assert.match(loadout.value, /燃焰之劍（已裝備）/);
+  assert.match(
+    payload.embeds[0].fields.find((field) => field.name === '狀態').value,
+    /攻擊力＋1（3回合）/,
+  );
   assert.doesNotMatch(labels.join('、'), /使用燃焰之劍/);
 });
 

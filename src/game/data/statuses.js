@@ -94,7 +94,7 @@ export const STATUSES = createCatalog([
   },
   {
     id: 'attack-up',
-    name: '攻擊力強化',
+    name: '攻擊力＋1',
     emoji: '💪',
     polarity: StatusPolarity.BUFF,
     category: 'stat-modifier',
