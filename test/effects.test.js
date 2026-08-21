@@ -11,7 +11,12 @@ import {
 } from '../src/game/engines/status-engine.js';
 
 function game() {
-  return createGame({ id: 'effects-test', ownerId: 'player-1' });
+  return createGame({
+    id: 'effects-test',
+    ownerId: 'player-1',
+    config: { initialEnemyUnitId: 'ruins-guardian' },
+    monsterRng: () => 0,
+  });
 }
 
 test('技能與道具使用同一套治療效果處理器', () => {
@@ -21,7 +26,7 @@ test('技能與道具使用同一套治療效果處理器', () => {
   const result = applyEffects({
     effects: getSkill('life-recovery').effects,
     source: state.player,
-    target: state.boss,
+    target: state.enemy,
   });
 
   assert.equal(result.source.hp, 45);
@@ -35,7 +40,7 @@ test('火焰炸彈會計算Boss火焰抗性並附加3層燃燒', () => {
   const result = applyEffects({
     effects: getItem('fire-bomb').effects,
     source: state.player,
-    target: state.boss,
+    target: state.enemy,
     rng: () => 0,
   });
 
@@ -51,7 +56,7 @@ test('單位自己的狀態覆寫優先於狀態庫Boss規則', () => {
   const state = game();
   const frozen = resolveStatusApplication({
     statusId: 'frozen',
-    targetUnit: state.boss,
+    targetUnit: state.enemy,
     chance: 1,
     rng: () => {
       throw new Error('免疫時不應抽選');
@@ -63,7 +68,7 @@ test('單位自己的狀態覆寫優先於狀態庫Boss規則', () => {
 
   const resisted = resolveStatusApplication({
     statusId: 'stunned',
-    targetUnit: state.boss,
+    targetUnit: state.enemy,
     chance: 1,
     rng: () => 0.25,
   });

@@ -9,6 +9,9 @@ function controllerFor(store, id = 'controller-test') {
     store,
     idGenerator: () => id,
     spinRng: () => 0,
+    worldRng: () => 0.99,
+    monsterRng: () => 0,
+    rewardRng: () => 0,
   });
 }
 
@@ -28,7 +31,7 @@ test('共用控制器可以建立並重新顯示新版戰鬥', async () => {
   });
 
   assert.equal(started.handled, true);
-  assert.equal(started.payload.embeds[0].title, '🎰 拉霸戰鬥｜第 1 回合');
+  assert.equal(started.payload.embeds[0].title, '🎰 地區 1｜第 1 回合');
   assert.equal(
     resumed.payload.components[0].components[0].custom_id,
     'slotbattle:controller-test:wager',
@@ -57,9 +60,9 @@ test('投入按鈕先開啟Modal，送出數字後才更新戰鬥', async () => 
   });
   const saved = await store.getSession('wager-test');
 
-  assert.equal(submitted.payload.embeds[0].title, '🎰 拉霸戰鬥｜第 1 回合');
+  assert.equal(submitted.payload.embeds[0].title, '🎰 地區 1｜第 1 回合');
   assert.equal(saved.state.resources.action, 2);
-  assert.equal(saved.state.boss.hp, 42);
+  assert.ok(saved.state.enemy.hp < saved.state.enemy.maxHp);
 });
 
 test('Modal拒絕小數與超過剩餘行動點的投入', async () => {
@@ -135,4 +138,26 @@ test('其他玩家無法操作別人的戰鬥面板', async () => {
     }),
     /其他玩家/,
   );
+});
+
+test('主動放棄會結算永久紀錄並清除本輪配置', async () => {
+  const store = new MemoryGameStore();
+  const controller = controllerFor(store, 'abandon-run');
+  await controller.handleCommand({
+    commandName: 'slotbattle',
+    subcommand: 'start',
+    userId: 'player-1',
+  });
+
+  const ended = await controller.handleComponent({
+    customId: 'slotbattle:abandon-run:abandon',
+    userId: 'player-1',
+  });
+  const session = await store.getSession('abandon-run');
+  const profile = await store.getOrCreateProfile('player-1');
+
+  assert.equal(ended.payload.embeds[0].title, '冒險結束');
+  assert.equal(session.state.endSummary.profileSettled, true);
+  assert.deepEqual(session.state.player.skillIds, []);
+  assert.equal(profile.profile.lifetimeStats.runsEnded, 1);
 });

@@ -9,6 +9,8 @@ import {
 import {
   abandonGame,
   activateSkill,
+  chooseReward,
+  completeEvent,
   createGame,
   endPlayerTurn,
   isStunned,
@@ -17,6 +19,7 @@ import {
   useItem,
 } from '../game/engine.js';
 import { StoreConflictError } from '../persistence/errors.js';
+import { settleRunProfile } from '../player/achievement-engine.js';
 import { upgradePlayerProfile } from '../player/profile.js';
 
 export const EPHEMERAL_FLAG = 64;
@@ -25,6 +28,9 @@ export function createGameController({
   store,
   idGenerator = createGameId,
   spinRng,
+  worldRng = Math.random,
+  monsterRng = Math.random,
+  rewardRng = Math.random,
 } = {}) {
   if (!store) throw new TypeError('建立遊戲控制器需要 store');
 
@@ -71,6 +77,8 @@ export function createGameController({
           id: idGenerator(),
           ownerId: userId,
           loadout: profileRecord.profile.lastStartingLoadout,
+          worldRng,
+          monsterRng,
         });
         let session;
         try {
@@ -117,8 +125,25 @@ export function createGameController({
           return handledResult(null, { modal: renderWagerModal(session.state) });
         }
 
-        const next = nextStateForAction(session.state, { action, value });
-        return saveAndRender(store, session, next);
+        let next;
+        if (action === 'restart') {
+          const profile = await ensureCurrentProfile(store, userId);
+          next = createGame({
+            id: session.state.id,
+            ownerId: userId,
+            loadout: profile.profile.lastStartingLoadout,
+            worldRng,
+            monsterRng,
+          });
+        } else {
+          next = nextStateForAction(session.state, { action, value }, {
+            effectRng: spinRng,
+            worldRng,
+            monsterRng,
+            rewardRng,
+          });
+        }
+        return saveAndRender(store, session, next, userId);
       });
     },
 
@@ -134,8 +159,11 @@ export function createGameController({
         if (!/^\d+$/.test(rawWager)) {
           throw new RangeError('請輸入不含小數點的正整數');
         }
-        const next = placeBet(session.state, Number(rawWager), { rng: spinRng });
-        return saveAndRender(store, session, next);
+        const next = placeBet(session.state, Number(rawWager), {
+          rng: spinRng,
+          rewardRng,
+        });
+        return saveAndRender(store, session, next, userId);
       });
     },
   };
@@ -211,9 +239,10 @@ async function ensureCurrentProfile(store, userId) {
   return store.saveProfile(upgraded, { expectedRevision: record.revision });
 }
 
-async function saveAndRender(store, session, next) {
+async function saveAndRender(store, session, next, userId) {
   try {
-    const saved = await store.saveSession(next, {
+    const settled = await settleFinishedRun(store, next, userId);
+    const saved = await store.saveSession(settled, {
       expectedRevision: session.revision,
     });
     return handledResult(renderGame(saved.state));
@@ -241,18 +270,38 @@ async function withGameLock({ busyGames, gameId }, callback) {
   }
 }
 
-function nextStateForAction(state, { action, value }) {
-  if (action === 'skill') return activateSkill(state, value);
-  if (action === 'item') return useItem(state, value);
-  if (action === 'end') return endPlayerTurn(state);
-  if (action === 'abandon') return abandonGame(state);
-  if (action === 'restart') {
-    return createGame({
-      id: state.id,
-      ownerId: state.ownerId,
-      loadout: loadoutFromState(state),
+function nextStateForAction(state, { action, value }, rngs) {
+  if (action === 'skill') {
+    return activateSkill(state, value, {
+      rng: rngs.effectRng,
+      rewardRng: rngs.rewardRng,
     });
   }
+  if (action === 'item') {
+    return useItem(state, value, {
+      rng: rngs.effectRng,
+      rewardRng: rngs.rewardRng,
+    });
+  }
+  if (action === 'end') {
+    return endPlayerTurn(state, {
+      monsterRng: rngs.monsterRng,
+      rewardRng: rngs.rewardRng,
+    });
+  }
+  if (action === 'reward') {
+    return chooseReward(state, Number(value), {
+      worldRng: rngs.worldRng,
+      monsterRng: rngs.monsterRng,
+    });
+  }
+  if (action === 'event-continue') {
+    return completeEvent(state, {
+      worldRng: rngs.worldRng,
+      monsterRng: rngs.monsterRng,
+    });
+  }
+  if (action === 'abandon') return abandonGame(state);
   throw new Error('未知的按鈕操作');
 }
 
@@ -285,21 +334,26 @@ function createGameId() {
   return globalThis.crypto.randomUUID().replaceAll('-', '').slice(0, 10);
 }
 
-function loadoutFromState(state) {
-  if (state.initialLoadout) return structuredClone(state.initialLoadout);
-  return {
-    skillIds: [...state.player.skillIds],
-    itemIds: [
-      ...state.player.inventory.flatMap(({ itemId, quantity }) => (
-        Array.from({ length: quantity }, () => itemId)
-      )),
-      ...Object.values(state.player.equipment ?? {}),
-    ],
-  };
-}
-
 function requireUserId(userId) {
   if (!userId) throw new TypeError('Discord 互動缺少玩家 ID');
+}
+
+async function settleFinishedRun(store, state, userId) {
+  if (!state.endSummary || state.endSummary.profileSettled) return state;
+  const record = await ensureCurrentProfile(store, userId);
+  const settlement = settleRunProfile(record.profile, state.endSummary);
+  if (settlement.changed) {
+    await store.saveProfile(settlement.profile, {
+      expectedRevision: record.revision,
+    });
+  }
+
+  const next = structuredClone(state);
+  next.endSummary.newAchievementIds = settlement.newAchievementIds;
+  next.endSummary.newUnlockSkillIds = settlement.newUnlockSkillIds;
+  next.endSummary.newUnlockItemIds = settlement.newUnlockItemIds;
+  next.endSummary.profileSettled = true;
+  return next;
 }
 
 function sameJson(left, right) {

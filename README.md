@@ -1,45 +1,107 @@
 # Discord 拉霸戰鬥
 
-以「自由投入行動點拉霸，立即攻擊、取得護甲與累積法力」為核心的單人 Boss 戰機器人。資料、規則、Discord 畫面與存檔已拆成獨立模組，作為後續 Roguelike 內容的基礎。
+以「自由投入行動點拉霸、即時結算攻防、累積技能與裝備」為核心的單人 Roguelike Discord 遊戲。玩家會在同一輪冒險中依序遭遇普通怪、菁英怪、Boss 或奇遇；擊敗 Boss 後前往更強的下一個地區，直到戰敗或主動放棄才結束遊戲。
 
-正式部署使用 **Discord HTTP Interactions + Cloudflare Workers 免費版**；不需要常駐主機或一直開著個人電腦。Cloudflare D1 負責即時戰鬥與玩家資料，Google Apps Script／試算表在背景保存玩家永久資料副本。原本的 Discord Gateway 啟動方式仍保留作為本機備用。
+正式部署使用 **Discord HTTP Interactions + Cloudflare Workers 免費版**。Cloudflare D1 負責即時遊戲與玩家永久資料，Google Apps Script／試算表在背景保存玩家資料副本；Google 同步不會阻塞 Discord 操作。
 
-## 目前可以遊玩的內容
+## Discord 指令與戰鬥
 
-- `/slotbattle start`：開始戰鬥；若已有進行中的戰鬥，會直接重新顯示。
-- `/slotbattle resume`：找回尚未結束的戰鬥面板。
-- `/slotbattle profile`：各選 1 個下一場使用的開局技能與道具。
+- `/slotbattle start`：開始新遊戲；若已有進行中的遊戲，會直接重新顯示。
+- `/slotbattle resume`：找回尚未結束的遊戲面板。
+- `/slotbattle profile`：各選 1 個下一場新遊戲使用的開局技能與道具。
 - `/slotbattle rules`：查看玩家操作說明。
-- 每回合 4 點行動點；按下「投入點數」後可輸入任意剩餘點數，一次投入或分次投入皆可。
+- 每回合取得行動點；按下「投入點數」後可輸入任意剩餘點數，一次投入或拆成多次拉霸。
 - 三格各以 30% 攻擊、30% 防禦、30% 技能、5% 幸運、5% 不幸抽選。
 - 同類圖示 1／2／3 個時為 1／3／9 點，再乘上本次投入的行動點。
-- 幸運將相同基礎值加入攻擊、防禦與技能；三個不幸會使玩家本回合暈眩。
-- 攻擊會立即傷害 Boss；防禦轉為本回合護甲；技能圖示轉為法力。
-- 技能可在拉霸之間主動使用；玩家目前可選治癒、強擊或火焰附加。
-- 消耗品可在戰鬥中使用，裝備會在開局自動穿戴；燃焰之劍會在戰鬥開始時賦予持續 3 回合的「攻擊力＋1」狀態。
-- 火焰炸彈造成 8 點傷害並附加 3 層燃燒；燃燒會在目標回合開始時造成等同層數的傷害，之後減少 1 層。
-- 玩家自行按下「回合結束」後 Boss 才會攻擊；行動點、護甲與法力不保留到下回合。
-- 支援勝利、失敗、放棄、重新挑戰與重啟後續戰。
+- 攻擊立即造成傷害、防禦轉成本回合護甲、技能轉為法力；幸運會同時取得三種效果。
+- 三個不幸會使玩家本回合暈眩，只能手動結束回合。
+- 玩家可在多次拉霸之間使用技能或消耗品；裝備在每場戰鬥開始時自動生效。
+- 玩家按下「回合結束」後敵人才會執行已預告的行動；未使用的行動點、護甲與法力不保留。
 
-## 已建立的 Roguelike 資料架構
+玩家版 `/slotbattle rules` 維持精簡操作說明；完整數值、機率及資料結構記錄在 [`docs/combat-v2.md`](docs/combat-v2.md)。
 
-| 資料 | 位置 | 目前內容 |
+## 冒險流程
+
+每次抽取下一個節點時依下列順序判定：
+
+1. **Boss**：同一地區前 4 次完成的遭遇不會遇到 Boss，但機率仍會每次累積 7 個百分點，因此第 5 次遭遇的 Boss 機率是 28%。
+2. **奇遇**：Boss 判定失敗後，以 20% 機率發生；整場遊戲的第一次遭遇不會是奇遇。奇遇也會增加一次地區進度。
+3. **菁英怪**：Boss 與奇遇都未發生時，基礎機率為 12%；此機率保存在地區資料，可由未來內容調整。
+4. **普通怪**：其餘情況進入普通戰鬥。
+
+擊敗 Boss 並選完獎勵後會前往下一地區。本次冒險的地區深度每增加 1，敵人的基礎生命與基礎傷害線性增加 20%；怪物技能數量、技能倍率、施放機率與其他規則不變。
+
+怪物會先判定普通攻擊或技能，再從持有技能中等機率選擇一個：
+
+| 怪物階級 | 普通攻擊 | 使用技能 | 持有技能數 |
+|---|---:|---:|---:|
+| 普通 | 60% | 40% | 1 |
+| 菁英 | 40% | 60% | 2 |
+| Boss | 20% | 80% | 3 |
+
+## 獎勵與稀有度
+
+戰鬥勝利後會產生 3 個獎勵選項，玩家選擇其中 1 個。每個選項會**各自獨立**抽取內容稀有度，再從該稀有度的玩家技能與道具中抽取內容。
+
+| 擊敗單位 | 普通 | 稀有 | 傳說 |
+|---|---:|---:|---:|
+| 普通怪 | 70% | 25% | 5% |
+| 菁英怪 | 30% | 60% | 10% |
+| Boss | 0% | 0% | 100% |
+
+下列機率是彼此獨立的資料與抽選流程，不會混用：
+
+- 怪物階級：決定遇到普通怪、菁英怪或 Boss。
+- 戰鬥獎勵稀有度：決定每一個三選一候選內容的稀有度，可由未來技能或道具調整權重。
+- 奇遇稀有度：固定為普通 50%、稀有 30%、傳說 20%，不受玩家技能、裝備或戰鬥獎勵加成影響。
+
+## 目前玩家技能與道具
+
+| 類型 | 稀有度 | 名稱 | 成本 | 效果 |
+|---|---|---|---|---|
+| 技能 | 普通 | 治癒 | 3 法力 | 回復 5 點生命。 |
+| 技能 | 普通 | 強擊 | 2 法力 | 造成 5 點傷害。 |
+| 技能 | 稀有 | 火焰附加 | 2 法力 | 每次攻擊額外造成 1 點傷害，持續 3 回合。 |
+| 技能 | 傳說 | 火焰衝擊 | 3 法力 | 造成 3 點傷害，並有 50% 機率附加 3 層燃燒狀態。 |
+| 消耗品 | 普通 | 生命藥水 | 0 行動點 | 回復 10 點生命。 |
+| 消耗品 | 稀有 | 火焰炸彈 | 0 行動點 | 造成 8 點傷害，並附加 3 層燃燒狀態。 |
+| 裝備 | 傳說 | 燃焰之劍 | 自動生效 | 戰鬥開始時獲得「攻擊力＋1」狀態，持續 3 回合。 |
+
+法力與行動點成本是獨立欄位，不寫入效果文字。消耗品目前使用後會扣除 1 個物品，但不消耗行動點；`actionCost` 欄位已保留，未來可逐項調整。攻擊力加成與燃燒皆由狀態引擎處理，可正常疊加。
+
+## 遊戲結束與永久資料
+
+戰敗或玩家按下「放棄遊戲」都會立即結束整場冒險。本輪取得的技能、道具、裝備、地區進度與戰鬥狀態不保留，但會先產生結算快照並結算永久成就。
+
+結算畫面會顯示：
+
+- 被哪個單位擊敗，或玩家主動放棄。
+- 本輪擊敗的單位總數。
+- 最後的裝備配置。
+- 最後的技能配置。
+- 本次新達成的成就與新解鎖的開局內容。
+
+成就引擎已支援依單輪或永久統計解鎖開局技能與道具，且同一場遊戲不會重複結算；正式成就名稱與條件尚待設計，目前成就內容庫保持空白。
+
+## 遊戲內容架構
+
+| 資料 | 位置 | 內容 |
 |---|---|---|
-| 單位庫 | `src/game/data/units.js` | 玩家、普通怪、菁英怪、Boss、rank、tags、抗性 |
-| 技能庫 | `src/game/data/skills.js` | 玩家／怪物共用技能與 effects |
-| 狀態庫 | `src/game/data/statuses.js` | 燃燒、中毒、冰凍、暈眩、強化、再生與 Boss 規則 |
-| 道具庫 | `src/game/data/items.js` | 消耗品、裝備與共用 effects |
-| 遭遇／事件 | `src/game/data/encounters.js`、`events.js` | 依 tags、rank 與權重抽選，包含高菁英機率事件 |
-| 掉落表 | `src/game/data/loot-tables.js` | 加權掉落、數量範圍與多次抽選 |
+| 單位庫 | `src/game/data/units.js` | 玩家、普通怪、菁英怪、Boss、階級與基礎能力 |
+| 玩家技能庫 | `src/game/data/skills.js` | 法力成本、稀有度、效果與掉落條件 |
+| 怪物技能庫 | `src/game/data/monster-skills.js` | 怪物技能倍率與額外效果，與玩家技能完全分離 |
+| 狀態庫 | `src/game/data/statuses.js` | 燃燒、暈眩、攻擊強化及抗性規則 |
+| 道具庫 | `src/game/data/items.js` | 消耗品、裝備、稀有度與共用效果 |
+| 地區／遭遇 | `src/game/data/regions.js`、`encounters.js` | Boss、奇遇、菁英與普通怪的判定參數 |
+| 奇遇庫 | `src/game/data/events.js` | 固定稀有度系統與事件結果 |
+| 掉落表 | `src/game/data/loot-tables.js` | 各怪物階級的三選一獨立稀有度權重 |
+| 成就庫 | `src/game/data/achievements.js` | 永久成就條件與開局內容解鎖 |
 
-技能與道具共用 `effects`；Boss 狀態規則支援 `normal`、`reduced`、`immune`，單位自己的 `statusOverrides` 具有最高優先權。
-
-目前消耗品的 `actionCost` 為 `0`，使用時不消耗行動點；欄位已保留，未來可對個別道具設定成本。裝備會在建立戰鬥時套用 `battleStartEffects`，攻擊力加成與燃燒層數則由狀態引擎處理。技能、道具與狀態都由共用效果引擎執行，不在 Discord 畫面內寫死效果。
-完整的執行流程與資料責任請見 [`docs/combat-v2.md`](docs/combat-v2.md)。
+內容定義皆為版本化唯讀資料，不寫入 D1。奇遇目前各稀有度只有一個不改變數值的暫用事件，等待正式事件效果設計。
 
 ## 免費部署到 Cloudflare Workers
 
-完整圖文欄位與驗證順序請依照 [`docs/cloudflare-workers.md`](docs/cloudflare-workers.md)。
+完整欄位與驗證順序請依照 [`docs/cloudflare-workers.md`](docs/cloudflare-workers.md)。
 
 部署後的資料流：
 
@@ -51,11 +113,7 @@ Discord 指令／按鈕
     → Google Apps Script／試算表（背景同步玩家永久資料）
 ```
 
-Worker 會在 Discord 的第一次互動回覆中直接送出結果，避免再由
-Cloudflare 主動呼叫 Discord Webhook；D1 查詢保持在互動回覆的 3 秒期限內，
-Google 試算表同步則使用背景工作，不會延後遊戲畫面。
-
-Worker 執行時需要一個 D1 binding `DB`，以及三個 Cloudflare Secrets：
+Worker 需要 D1 binding `DB`，以及三個 Cloudflare Secrets：
 
 ```text
 DISCORD_PUBLIC_KEY
@@ -63,63 +121,16 @@ APPS_SCRIPT_URL
 APPS_SCRIPT_SECRET
 ```
 
-Bot Token 不放在 Worker；它只用於註冊斜線指令。專案提供手動執行的 GitHub Actions 工作流程 `Register Discord Commands`，可避免在個人電腦安裝與執行 Node.js。
-
-## 本機 Gateway 備用模式
-
-需求：Node.js 24.17.0 以上、Discord Application、Bot Token 與測試伺服器。
-
-1. 到 [Discord Developer Portal](https://discord.com/developers/applications) 建立 Application 與 Bot。
-2. 安裝到測試伺服器，Scopes 包含 `bot`、`applications.commands`，並授予傳送訊息與嵌入連結權限。
-3. 建立本機環境檔：
-
-```bash
-cp .env.example .env
-```
-
-4. 填入：
-
-```env
-DISCORD_TOKEN=Bot_Token
-DISCORD_CLIENT_ID=Application_ID
-DISCORD_GUILD_ID=測試伺服器ID
-```
-
-5. 安裝、註冊指令並啟動：
-
-```bash
-npm ci
-npm run register
-npm start
-```
-
-測試期建議填入 `DISCORD_GUILD_ID`；留空會註冊為全域指令，顯示更新可能需要等待。Cloudflare 正式版本不需要執行 `npm start`。
+Bot Token 不放在 Worker；它只用於註冊斜線指令。專案提供手動執行的 GitHub Actions 工作流程 `Register Discord Commands`。
 
 ## 玩家存檔
 
-未設定 Google 存檔時，機器人使用記憶體模式，重啟後戰鬥會消失。
+Cloudflare 正式版沿用既有兩張 D1 資料表，不需要新增 migration：
 
-Cloudflare 正式版使用 D1 的兩張資料表：
+- `slotbattle_sessions`：保存整輪冒險狀態 JSON 與 revision。
+- `slotbattle_profiles`：保存永久解鎖、開局配置、成就與累計統計。
 
-- `slotbattle_sessions`：即時戰鬥狀態與版本號。
-- `slotbattle_profiles`：玩家永久資料與版本號。
-
-資料表定義在 `migrations/0001_initial.sql`。D1 讓 Discord 操作不必等待 Google 試算表；Apps Script 只在背景把新建或更新後的玩家資料同步到 `slotbattle_profiles` 工作表。
-
-單位、技能、狀態、道具、事件與掉落屬於版本化遊戲內容，保存在 `src/game/data/`，不重複寫入 D1。D1 只保存會隨玩家操作改變的戰鬥實例與玩家配置。
-
-要啟用 Google 試算表，依照 [`apps-script/README.md`](apps-script/README.md) 部署 `Code.gs`，再設定：
-
-```env
-APPS_SCRIPT_URL=https://script.google.com/macros/s/.../exec
-APPS_SCRIPT_SECRET=伺服器端密鑰
-```
-
-Google 試算表會保存：
-
-- Discord 玩家 ID 與永久解鎖資料。
-- 初始技能／道具欄位與最後開局配置。
-- D1 的 `revision` 版本號；較舊的背景請求不會覆蓋新版資料。
+資料表定義在 `migrations/0001_initial.sql`。Apps Script 只在背景把 D1 玩家資料同步到 Google 試算表，較舊的 revision 不會覆蓋新版資料。
 
 ## 測試與平衡
 
@@ -127,36 +138,16 @@ Google 試算表會保存：
 npm test
 npm run validate-data
 npm run simulate
-npm run simulate -- 100000
+npm run simulate -- 1000
 npm run worker:check
 ```
 
-測試涵蓋拉霸全部 125 種排列、自由投入 Modal、即時戰鬥、技能／道具／裝備、開局選擇、舊存檔升級、資料引用、Boss 狀態規則、菁英遭遇、掉落與存檔版本衝突。GitHub Actions 會在 Push 與 Pull Request 時自動執行測試、資料驗證及短版模擬。
+測試涵蓋拉霸全部 125 種排列、自由投入 Modal、即時戰鬥、怪物行動、奇遇與 Boss 判定順序、三選一獨立稀有度、區域成長、玩家／怪物技能分離、遊戲結算、成就冪等性、舊存檔升級與 D1 版本衝突。GitHub Actions 會在 Push 與 Pull Request 時自動執行測試、資料驗證、模擬及 Worker 打包。
 
-戰鬥基礎設定在 `src/game/config.js`；正式內容應優先修改 `src/game/data/`，不要把新單位或技能寫回 Discord 畫面或戰鬥函式。
+## 尚待設計的內容
 
-## 專案結構
-
-```text
-src/game/data/       單位、技能、狀態、道具、事件、遭遇、掉落
-src/game/engines/    共用效果、狀態、抽選、事件與掉落引擎
-src/game/            拉霸、計分與目前 Boss 戰流程
-src/discord/         指令、共用控制器與 Discord 訊息
-src/worker.js        Cloudflare Workers HTTP Interactions 入口
-src/player/          永久玩家資料格式
-src/persistence/     D1／Google鏡像／記憶體存檔介面
-migrations/          Cloudflare D1資料表遷移
-apps-script/         Google 試算表 Web App
-docs/                Cloudflare 部署操作說明
-scripts/             指令註冊、模擬與資料驗證
-test/                自動測試
-```
-
-## 尚未實作的遊戲內容
-
-- 房間地圖、樓層推進與完整 RunState 流程。
-- 冒險途中替換技能、管理多格背包與更換裝備。
-- 戰勝後的掉落選擇與永久解鎖條件。
+- 正式奇遇名稱、敘事、選項與實際效果。
+- 正式成就名稱、條件及對應的開局技能／道具解鎖。
+- 更多地區、怪物、玩家技能與道具，避免長局中獎勵內容重複。
+- 冒險途中更換裝備、管理多格背包與技能配置的介面。
 - 多人協力戰鬥。
-
-這些功能所需的資料庫與共用引擎已分離，之後可以逐項加入而不必重寫 Discord 介面或拉霸計分。

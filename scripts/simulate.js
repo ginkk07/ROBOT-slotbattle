@@ -3,8 +3,11 @@ import { randomInt } from 'node:crypto';
 import { getSkill } from '../src/game/data/skills.js';
 import {
   activateSkill,
+  chooseReward,
+  completeEvent,
   createGame,
   endPlayerTurn,
+  GamePhase,
   GameStatus,
   isStunned,
   placeBet,
@@ -14,44 +17,74 @@ const requestedRuns = Number.parseInt(process.argv[2] ?? '10000', 10);
 const runs = Number.isInteger(requestedRuns) && requestedRuns > 0
   ? requestedRuns
   : 10000;
-const rng = (max) => randomInt(max);
+const spinRng = (maximum) => randomInt(maximum);
+const probabilityRng = () => randomInt(1_000_000) / 1_000_000;
 const config = simulationConfigFromEnvironment();
 
 for (const strategy of ['all-in', 'split-twice', 'split-evenly']) {
   const summary = simulate(strategy, runs);
-  const winRate = ((summary.wins / runs) * 100).toFixed(2);
-  const averageRounds = (summary.totalRounds / runs).toFixed(2);
-
   console.log([
     `${strategy}:`,
-    `${winRate}% 勝率`,
-    `平均 ${averageRounds} 回合`,
-    `最長 ${summary.longestGame} 回合`,
+    `平均擊敗 ${(summary.unitsDefeated / runs).toFixed(2)} 個單位`,
+    `平均到達地區 ${(summary.regionDepth / runs).toFixed(2)}`,
+    `平均 ${((summary.turns / runs)).toFixed(2)} 回合`,
   ].join(' '));
 }
 
 function simulate(strategy, iterations) {
-  const summary = { wins: 0, totalRounds: 0, longestGame: 0 };
+  const summary = { unitsDefeated: 0, regionDepth: 0, turns: 0 };
 
   for (let index = 0; index < iterations; index += 1) {
+    let turns = 0;
     let state = createGame({
       id: `sim-${index}`,
       ownerId: 'simulator',
       config,
+      worldRng: probabilityRng,
+      monsterRng: probabilityRng,
     });
 
-    while (state.status === GameStatus.ACTIVE && state.round <= 200) {
+    while (state.status === GameStatus.ACTIVE && turns < 500) {
+      if (state.phase === GamePhase.REWARD_CHOICE) {
+        state = chooseReward(state, 0, {
+          worldRng: probabilityRng,
+          monsterRng: probabilityRng,
+        });
+        continue;
+      }
+      if (state.phase === GamePhase.EVENT) {
+        state = completeEvent(state, {
+          worldRng: probabilityRng,
+          monsterRng: probabilityRng,
+        });
+        continue;
+      }
+
       for (const wager of wagersFor(strategy, state.resources.action)) {
         if (state.status !== GameStatus.ACTIVE || isStunned(state)) break;
-        state = placeBet(state, wager, { rng });
+        state = placeBet(state, wager, {
+          rng: spinRng,
+          rewardRng: probabilityRng,
+        });
+        if (state.phase !== GamePhase.PLAYER_TURN) break;
         state = useHealingWhenPossible(state);
       }
-      if (state.status === GameStatus.ACTIVE) state = endPlayerTurn(state);
+      if (state.phase === GamePhase.PLAYER_TURN) {
+        state = endPlayerTurn(state, {
+          monsterRng: probabilityRng,
+          rewardRng: probabilityRng,
+        });
+        turns += 1;
+      }
     }
 
-    if (state.status === GameStatus.WON) summary.wins += 1;
-    summary.totalRounds += state.round;
-    summary.longestGame = Math.max(summary.longestGame, state.round);
+    summary.unitsDefeated += state.endSummary?.defeatedUnitCount
+      ?? state.adventure?.defeatedUnitCount
+      ?? 0;
+    summary.regionDepth += state.endSummary?.finalRegionDepth
+      ?? state.adventure?.regionDepth
+      ?? 1;
+    summary.turns += turns;
   }
 
   return summary;
@@ -67,39 +100,25 @@ function wagersFor(strategy, available) {
 }
 
 function useHealingWhenPossible(state) {
-  const skillId = state.player.equippedSkillId;
+  const skillId = state.player.skillIds.find((id) => id === 'life-recovery');
+  if (!skillId) return state;
   const skill = getSkill(skillId);
   let next = state;
   while (
     next.status === GameStatus.ACTIVE
+    && next.phase === GamePhase.PLAYER_TURN
     && !isStunned(next)
     && next.player.hp < next.player.maxHp
     && next.resources.mana >= skill.cost
   ) {
-    next = activateSkill(next, skillId);
+    next = activateSkill(next, skillId, { rewardRng: probabilityRng });
   }
   return next;
 }
 
 function simulationConfigFromEnvironment() {
   const playerMaxHp = optionalPositiveInteger('SLOT_PLAYER_HP');
-  const bossMaxHp = optionalPositiveInteger('SLOT_BOSS_HP');
-  const attackPattern = process.env.SLOT_BOSS_PATTERN
-    ?.split(',')
-    .map((value) => Number.parseInt(value.trim(), 10));
-
-  const config = {};
-  if (playerMaxHp) config.playerMaxHp = playerMaxHp;
-
-  if (bossMaxHp || attackPattern?.length) {
-    config.boss = {};
-    if (bossMaxHp) config.boss.maxHp = bossMaxHp;
-    if (attackPattern?.length && attackPattern.every((value) => Number.isInteger(value) && value > 0)) {
-      config.boss.attackPattern = attackPattern;
-    }
-  }
-
-  return config;
+  return playerMaxHp ? { playerMaxHp } : {};
 }
 
 function optionalPositiveInteger(name) {

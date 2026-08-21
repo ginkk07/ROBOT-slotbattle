@@ -1,4 +1,5 @@
 import { createCatalog, requireDefinition } from './catalog.js';
+import { ContentRarity } from './rarities.js';
 
 export const ITEMS = createCatalog([
   {
@@ -6,6 +7,10 @@ export const ITEMS = createCatalog([
     name: '生命藥水',
     emoji: '🧪',
     type: 'consumable',
+    rarity: ContentRarity.COMMON,
+    lootEligible: true,
+    lootWeight: 100,
+    lootTags: ['ruins'],
     stackable: true,
     maxStack: 99,
     actionCost: 0,
@@ -19,6 +24,10 @@ export const ITEMS = createCatalog([
     name: '火焰炸彈',
     emoji: '💣',
     type: 'consumable',
+    rarity: ContentRarity.RARE,
+    lootEligible: true,
+    lootWeight: 100,
+    lootTags: ['ruins'],
     stackable: true,
     maxStack: 20,
     actionCost: 0,
@@ -40,6 +49,10 @@ export const ITEMS = createCatalog([
     name: '燃焰之劍',
     emoji: '🗡️',
     type: 'equipment',
+    rarity: ContentRarity.LEGENDARY,
+    lootEligible: true,
+    lootWeight: 100,
+    lootTags: ['ruins'],
     slot: 'weapon',
     stackable: false,
     description: '戰鬥開始時獲得「攻擊力＋1」狀態，持續3回合。',

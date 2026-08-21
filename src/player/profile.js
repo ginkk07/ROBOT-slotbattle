@@ -1,4 +1,7 @@
-export const PLAYER_SAVE_VERSION = 2;
+import { ITEMS } from '../game/data/items.js';
+import { SKILLS } from '../game/data/skills.js';
+
+export const PLAYER_SAVE_VERSION = 3;
 
 export const STARTING_SKILL_IDS = Object.freeze([
   'life-recovery',
@@ -20,6 +23,12 @@ export function createDefaultProfile(playerId) {
     saveVersion: PLAYER_SAVE_VERSION,
     unlockedStartingSkillIds: [...STARTING_SKILL_IDS],
     unlockedStartingItemIds: [...STARTING_ITEM_IDS],
+    achievementIds: [],
+    settledRunIds: [],
+    lifetimeStats: {
+      runsEnded: 0,
+      unitsDefeated: 0,
+    },
     startingSkillSlots: 1,
     startingItemSlots: 1,
     lastStartingLoadout: {
@@ -35,10 +44,12 @@ export function upgradePlayerProfile(value, playerId = value?.playerId) {
   const source = value ? structuredClone(value) : {};
   const unlockedSkills = uniqueKnownIds(
     source.unlockedStartingSkillIds,
+    Object.keys(SKILLS),
     STARTING_SKILL_IDS,
   );
   const unlockedItems = uniqueKnownIds(
     source.unlockedStartingItemIds,
+    Object.keys(ITEMS),
     STARTING_ITEM_IDS,
   );
   const selectedSkill = firstAllowed(
@@ -56,6 +67,12 @@ export function upgradePlayerProfile(value, playerId = value?.playerId) {
     saveVersion: PLAYER_SAVE_VERSION,
     unlockedStartingSkillIds: unlockedSkills,
     unlockedStartingItemIds: unlockedItems,
+    achievementIds: uniqueStrings(source.achievementIds),
+    settledRunIds: uniqueStrings(source.settledRunIds).slice(-50),
+    lifetimeStats: {
+      runsEnded: nonNegativeInteger(source.lifetimeStats?.runsEnded),
+      unitsDefeated: nonNegativeInteger(source.lifetimeStats?.unitsDefeated),
+    },
     startingSkillSlots: 1,
     startingItemSlots: 1,
     lastStartingLoadout: {
@@ -65,10 +82,10 @@ export function upgradePlayerProfile(value, playerId = value?.playerId) {
   };
 }
 
-function uniqueKnownIds(current, defaults) {
+function uniqueKnownIds(current, known, defaults) {
   return [...new Set([
     ...(Array.isArray(current)
-      ? current.filter((id) => defaults.includes(id))
+      ? current.filter((id) => known.includes(id))
       : []),
     ...defaults,
   ])];
@@ -77,4 +94,16 @@ function uniqueKnownIds(current, defaults) {
 function firstAllowed(selected, unlocked) {
   return (Array.isArray(selected) ? selected : [])
     .find((id) => unlocked.includes(id));
+}
+
+function uniqueStrings(values) {
+  return [...new Set(
+    (Array.isArray(values) ? values : [])
+      .filter((value) => typeof value === 'string' && value),
+  )];
+}
+
+function nonNegativeInteger(value) {
+  const number = Number(value ?? 0);
+  return Number.isInteger(number) && number >= 0 ? number : 0;
 }

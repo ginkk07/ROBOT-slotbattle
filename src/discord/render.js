@@ -1,12 +1,20 @@
+import { ACHIEVEMENTS } from '../game/data/achievements.js';
 import { getItem } from '../game/data/items.js';
+import { rarityLabel } from '../game/data/rarities.js';
 import { getSkill } from '../game/data/skills.js';
 import { getStatus } from '../game/data/statuses.js';
-import { GameStatus, getBossIntent, isStunned } from '../game/engine.js';
+import {
+  GamePhase,
+  GameStatus,
+  getEnemyIntent,
+  isStunned,
+} from '../game/engine.js';
 import { formatReels } from '../game/symbols.js';
 
 const COLORS = Object.freeze({
   active: 0x7c5cff,
-  won: 0x3ba55d,
+  reward: 0x3ba55d,
+  event: 0xfee75c,
   lost: 0xed4245,
   abandoned: 0x747f8d,
 });
@@ -30,62 +38,10 @@ const TEXT_INPUT_STYLE = Object.freeze({ SHORT: 1 });
 export const WAGER_INPUT_ID = 'wager';
 
 export function renderGame(state) {
-  const embed = {
-    color: COLORS[state.status] ?? COLORS.active,
-    title: titleFor(state),
-    description: descriptionFor(state),
-    fields: [
-      {
-        name: `👤 玩家 HP　${state.player.hp}/${state.player.maxHp}`,
-        value: healthBar(state.player.hp, state.player.maxHp, '🟩'),
-        inline: false,
-      },
-      {
-        name: `👹 ${rankLabel(state.boss.rank)}${state.boss.name} HP　${state.boss.hp}/${state.boss.maxHp}`,
-        value: healthBar(state.boss.hp, state.boss.maxHp, '🟥'),
-        inline: false,
-      },
-      {
-        name: '本回合資源',
-        value: resourceLine(state),
-        inline: false,
-      },
-      {
-        name: '攜帶內容',
-        value: loadoutLine(state),
-        inline: false,
-      },
-    ],
-    footer: { text: '行動點、護甲與法力都會在回合結束時清空' },
-  };
-
-  const lastSpin = lastSpinText(state);
-  if (lastSpin) {
-    embed.fields.push({ name: '🎰 最近一次拉霸', value: lastSpin, inline: false });
-  }
-
-  if (state.lastAction && state.lastAction.type !== 'spin') {
-    embed.fields.push({
-      name: '最近行動',
-      value: state.lastAction.text,
-      inline: false,
-    });
-  }
-
-  const lastResolution = lastResolutionText(state);
-  if (lastResolution) {
-    embed.fields.push({ name: '📜 上回合結果', value: lastResolution, inline: false });
-  }
-
-  const statusText = activeStatusText(state);
-  if (statusText) {
-    embed.fields.push({ name: '狀態', value: statusText, inline: false });
-  }
-
-  return {
-    embeds: [embed],
-    components: buildControls(state),
-  };
+  if (state.status !== GameStatus.ACTIVE) return renderEndSummary(state);
+  if (state.phase === GamePhase.REWARD_CHOICE) return renderRewardChoice(state);
+  if (state.phase === GamePhase.EVENT) return renderEvent(state);
+  return renderCombat(state);
 }
 
 export function renderProfile(profileRecord) {
@@ -100,7 +56,7 @@ export function renderProfile(profileRecord) {
     title: '🧭 開局配置',
     description: [
       '從下方選單各選 **1 個技能**與 **1 個道具**。',
-      '選擇會立即保存，並在下一場新戰鬥生效；進行中的戰鬥不會改變。',
+      '選擇會立即保存，並在下一場新遊戲生效；進行中的遊戲不會改變。',
     ].join('\n'),
     fields: [
       {
@@ -115,6 +71,11 @@ export function renderProfile(profileRecord) {
         value: selectedItem
           ? `${selectedItem.emoji} **${selectedItem.name}**｜${itemTypeLabel(selectedItem)}\n${selectedItem.description}`
           : '尚未選擇',
+        inline: false,
+      },
+      {
+        name: '永久紀錄',
+        value: `成就 ${profile.achievementIds?.length ?? 0}｜結束遊戲 ${profile.lifetimeStats?.runsEnded ?? 0}｜擊敗單位 ${profile.lifetimeStats?.unitsDefeated ?? 0}`,
         inline: false,
       },
     ],
@@ -174,68 +135,198 @@ export function renderWagerModal(state) {
   };
 }
 
-function buildControls(state) {
-  if (state.status !== GameStatus.ACTIVE) {
-    return [
-      actionRow([
-        button({
-          customId: gameCustomId(state.id, 'restart'),
-          label: '以相同配置再來一場',
-          emoji: '🔄',
-          style: BUTTON_STYLE.PRIMARY,
-        }),
-      ]),
-    ];
-  }
+function renderCombat(state) {
+  const embed = {
+    color: COLORS.active,
+    title: `🎰 地區 ${state.adventure.regionDepth}｜第 ${state.round} 回合`,
+    description: combatDescription(state),
+    fields: [
+      {
+        name: `👤 玩家 HP　${state.player.hp}/${state.player.maxHp}`,
+        value: healthBar(state.player.hp, state.player.maxHp, '🟩'),
+        inline: false,
+      },
+      {
+        name: `👹 ${rankLabel(state.enemy.rank)}${state.enemy.name} HP　${state.enemy.hp}/${state.enemy.maxHp}`,
+        value: healthBar(state.enemy.hp, state.enemy.maxHp, '🟥'),
+        inline: false,
+      },
+      {
+        name: '冒險進度',
+        value: `本區完成 ${state.adventure.regionProgress} 次遭遇｜總擊敗 ${state.adventure.defeatedUnitCount} 個單位`,
+        inline: false,
+      },
+      { name: '本回合資源', value: resourceLine(state), inline: false },
+      { name: '目前配置', value: loadoutLine(state), inline: false },
+    ],
+    footer: { text: '行動點、護甲與法力都會在回合結束時清空' },
+  };
 
-  const stunned = isStunned(state);
-  const skill = getSkill(state.player.equippedSkillId ?? state.player.skillIds[0]);
-  const consumable = firstConsumable(state);
-  const actionComponents = [
-    button({
-      customId: gameCustomId(state.id, 'wager'),
-      label: `投入點數（剩餘 ${state.resources.action}）`,
-      emoji: '🎟️',
+  const lastSpin = lastSpinText(state);
+  if (lastSpin) embed.fields.push({ name: '🎰 最近一次拉霸', value: lastSpin });
+  if (state.lastAction && state.lastAction.type !== 'spin') {
+    embed.fields.push({ name: '最近行動', value: state.lastAction.text });
+  }
+  const lastResolution = lastResolutionText(state);
+  if (lastResolution) embed.fields.push({ name: '📜 上回合結果', value: lastResolution });
+  const statusText = activeStatusText(state);
+  if (statusText) embed.fields.push({ name: '狀態', value: statusText });
+
+  return { embeds: [embed], components: combatControls(state) };
+}
+
+function renderRewardChoice(state) {
+  const fields = state.rewardChoices.map((choice, index) => {
+    const content = rewardContent(choice);
+    return {
+      name: `${index + 1}. 【${rarityLabel(choice.rarity)}】${content.name}`,
+      value: rewardDescription(choice, content),
+      inline: false,
+    };
+  });
+  return {
+    embeds: [{
+      color: COLORS.reward,
+      title: '🏆 戰鬥勝利｜選擇獎勵',
+      description: `你擊敗了 **${state.enemy.name}**。三個選項會各自獨立抽取稀有度，請選擇其中一個。`,
+      fields,
+      footer: { text: `目前共擊敗 ${state.adventure.defeatedUnitCount} 個單位` },
+    }],
+    components: [
+      actionRow(state.rewardChoices.map((choice, index) => button({
+        customId: gameCustomId(state.id, 'reward', String(index)),
+        label: `${index + 1}. ${rewardContent(choice).name}`,
+        emoji: rewardContent(choice).emoji,
+        style: BUTTON_STYLE.SUCCESS,
+      }))),
+      actionRow([abandonButton(state.id)]),
+    ],
+  };
+}
+
+function renderEvent(state) {
+  return {
+    embeds: [{
+      color: COLORS.event,
+      title: `【${rarityLabel(state.event.rarity)}奇遇】${state.event.name}`,
+      description: state.event.description,
+      fields: [{
+        name: '冒險進度',
+        value: `地區 ${state.adventure.regionDepth}｜本區完成 ${state.adventure.regionProgress} 次遭遇`,
+      }],
+      footer: { text: '完成奇遇會增加一次地區進度' },
+    }],
+    components: [actionRow([
+      button({
+        customId: gameCustomId(state.id, 'event-continue'),
+        label: '完成奇遇並繼續',
+        emoji: '🧭',
+        style: BUTTON_STYLE.PRIMARY,
+      }),
+      abandonButton(state.id),
+    ])],
+  };
+}
+
+function renderEndSummary(state) {
+  const summary = state.endSummary;
+  const lost = state.status === GameStatus.LOST;
+  const description = lost
+    ? `你被 **${summary?.defeatedBy ?? '未知單位'}** 擊敗了。`
+    : '你放棄了本次冒險。';
+  const equipment = namesFor(summary?.finalEquipmentIds ?? [], getItem);
+  const skills = namesFor(summary?.finalSkillIds ?? [], getSkill);
+  const achievements = (summary?.newAchievementIds ?? [])
+    .map((id) => ACHIEVEMENTS[id]?.name ?? id);
+  const unlocks = [
+    ...namesFor(summary?.newUnlockSkillIds ?? [], getSkill),
+    ...namesFor(summary?.newUnlockItemIds ?? [], getItem),
+  ];
+
+  return {
+    embeds: [{
+      color: COLORS[state.status] ?? COLORS.abandoned,
+      title: '冒險結束',
+      description,
+      fields: [
+        { name: '擊敗單位', value: String(summary?.defeatedUnitCount ?? 0) },
+        { name: '最後裝備配置', value: equipment.join('、') || '沒有裝備' },
+        { name: '最後技能配置', value: skills.join('、') || '沒有技能' },
+        { name: '本次達成成就', value: achievements.join('、') || '沒有新成就' },
+        { name: '新解鎖開局內容', value: unlocks.join('、') || '沒有新解鎖' },
+      ],
+      footer: { text: '本輪取得的技能、道具與地區進度已清除' },
+    }],
+    components: [actionRow([button({
+      customId: gameCustomId(state.id, 'restart'),
+      label: '開始新遊戲',
+      emoji: '🔄',
       style: BUTTON_STYLE.PRIMARY,
-      disabled: stunned || state.resources.action < 1,
-    }),
-    button({
+    })])],
+  };
+}
+
+function combatControls(state) {
+  const stunned = isStunned(state);
+  const actionButtons = [button({
+    customId: gameCustomId(state.id, 'wager'),
+    label: `投入點數（剩餘 ${state.resources.action}）`,
+    emoji: '🎟️',
+    style: BUTTON_STYLE.PRIMARY,
+    disabled: stunned || state.resources.action < 1,
+  })];
+
+  for (const skillId of state.player.skillIds) {
+    const skill = getSkill(skillId);
+    actionButtons.push(button({
       customId: gameCustomId(state.id, 'skill', skill.id),
       label: `${skill.name}（${skill.cost}法力）`,
       emoji: skill.emoji,
       style: BUTTON_STYLE.SECONDARY,
       disabled: stunned || skillUnavailable(state, skill),
-    }),
-  ];
-
-  if (consumable) {
-    const actionCost = consumable.item.actionCost ?? 0;
-    actionComponents.push(button({
-      customId: gameCustomId(state.id, 'item', consumable.item.id),
-      label: `使用${consumable.item.name}${actionCost ? `（${actionCost}行動）` : ''} ×${consumable.quantity}`,
-      emoji: consumable.item.emoji,
+    }));
+  }
+  for (const { itemId, quantity } of state.player.inventory ?? []) {
+    const item = getItem(itemId);
+    if (item.type !== 'consumable' || quantity < 1) continue;
+    const actionCost = item.actionCost ?? 0;
+    actionButtons.push(button({
+      customId: gameCustomId(state.id, 'item', item.id),
+      label: `使用${item.name}${actionCost ? `（${actionCost}行動）` : ''} ×${quantity}`,
+      emoji: item.emoji,
       style: BUTTON_STYLE.SECONDARY,
-      disabled: stunned || itemUnavailable(state, consumable.item),
+      disabled: stunned || itemUnavailable(state, item),
     }));
   }
 
+  const rows = chunk(actionButtons, 5).slice(0, 4).map(actionRow);
+  rows.push(actionRow([
+    button({
+      customId: gameCustomId(state.id, 'end'),
+      label: '回合結束',
+      emoji: '⏹️',
+      style: BUTTON_STYLE.SUCCESS,
+    }),
+    abandonButton(state.id),
+  ]));
+  return rows;
+}
+
+function combatDescription(state) {
+  const intent = getEnemyIntent(state);
+  const intentText = intent
+    ? `${intent.name}，預計造成 ${intent.damage} 點傷害`
+    : '尚未決定';
+  if (isStunned(state)) {
+    return [
+      '**你陷入暈眩，本回合只能按「回合結束」。**',
+      `敵人行動預告：${intentText}`,
+    ].join('\n');
+  }
   return [
-    actionRow(actionComponents),
-    actionRow([
-      button({
-        customId: gameCustomId(state.id, 'end'),
-        label: '回合結束',
-        emoji: '⏹️',
-        style: BUTTON_STYLE.SUCCESS,
-      }),
-      button({
-        customId: gameCustomId(state.id, 'abandon'),
-        label: '放棄戰鬥',
-        emoji: '🏳️',
-        style: BUTTON_STYLE.DANGER,
-      }),
-    ]),
-  ];
+    `**敵人行動預告：${intentText}**`,
+    '可繼續投入、使用技能／道具，或自行結束回合。',
+  ].join('\n');
 }
 
 function skillSelect(profile, selectedId) {
@@ -278,55 +369,6 @@ function itemSelect(profile, selectedId) {
   };
 }
 
-function actionRow(components) {
-  return {
-    type: COMPONENT_TYPE.ACTION_ROW,
-    components,
-  };
-}
-
-function button({ customId, label, emoji, style, disabled = false }) {
-  return {
-    type: COMPONENT_TYPE.BUTTON,
-    custom_id: customId,
-    label,
-    emoji: { name: emoji },
-    style,
-    disabled,
-  };
-}
-
-function gameCustomId(gameId, action, value) {
-  return ['slotbattle', gameId, action, value].filter(Boolean).join(':');
-}
-
-function titleFor(state) {
-  if (state.status === GameStatus.WON) return '🏆 戰鬥勝利';
-  if (state.status === GameStatus.LOST) return '☠️ 戰鬥失敗';
-  if (state.status === GameStatus.ABANDONED) return '🏳️ 已放棄戰鬥';
-  return `🎰 拉霸戰鬥｜第 ${state.round} 回合`;
-}
-
-function descriptionFor(state) {
-  if (state.status === GameStatus.WON) {
-    return `你在第 **${state.round}** 回合擊敗了 **${state.boss.name}**。`;
-  }
-  if (state.status === GameStatus.LOST) {
-    return `你在第 **${state.round}** 回合被 **${state.boss.name}** 擊敗。`;
-  }
-  if (state.status === GameStatus.ABANDONED) return '本場戰鬥已結束。';
-  if (isStunned(state)) {
-    return [
-      '**你陷入暈眩，本回合只能按「回合結束」。**',
-      `Boss 行動預告：造成 ${getBossIntent(state)} 點傷害`,
-    ].join('\n');
-  }
-  return [
-    `**Boss 行動預告：造成 ${getBossIntent(state)} 點傷害**`,
-    '可繼續投入、使用技能／道具，或自行結束回合。',
-  ].join('\n');
-}
-
 function resourceLine(state) {
   return [
     `🎟️ 行動 **${state.resources.action}**`,
@@ -336,18 +378,22 @@ function resourceLine(state) {
 }
 
 function loadoutLine(state) {
-  const skill = getSkill(state.player.equippedSkillId ?? state.player.skillIds[0]);
-  const equipment = Object.values(state.player.equipment ?? {})
-    .map((id) => {
-      const item = getItem(id);
-      return `${item.emoji}${item.name}（已裝備）`;
-    });
+  const skills = state.player.skillIds.map((id) => {
+    const skill = getSkill(id);
+    return `${skill.emoji}${skill.name}（${skill.cost}法力）`;
+  });
+  const equipment = Object.values(state.player.equipment ?? {}).map((id) => {
+    const item = getItem(id);
+    return `${item.emoji}${item.name}（已裝備）`;
+  });
   const inventory = (state.player.inventory ?? []).map(({ itemId, quantity }) => {
     const item = getItem(itemId);
     return `${item.emoji}${item.name}×${quantity}`;
   });
-  const items = [...equipment, ...inventory];
-  return `${skill.emoji}${skill.name}（${skill.cost}法力）\n${items.join('、') || '沒有道具'}`;
+  return [
+    `技能：${skills.join('、') || '沒有技能'}`,
+    `道具：${[...equipment, ...inventory].join('、') || '沒有道具'}`,
+  ].join('\n');
 }
 
 function lastSpinText(state) {
@@ -355,11 +401,9 @@ function lastSpinText(state) {
   if (state.lastSpin.stunned) {
     return `${formatReels(state.lastSpin.reels)}\n三個不幸：失去本回合資源並陷入暈眩。`;
   }
-
   const awarded = state.lastSpin.awarded;
   const impact = state.lastImpact ?? {};
   const bonuses = [];
-  if (impact.equipmentBonus) bonuses.push(`裝備 +${impact.equipmentBonus}`);
   if (impact.statusBonus) bonuses.push(`狀態 +${impact.statusBonus}`);
   return [
     formatReels(state.lastSpin.reels),
@@ -374,12 +418,12 @@ function lastResolutionText(state) {
   const discarded = [];
   if (result.discardedAction) discarded.push(`行動 ${result.discardedAction}`);
   if (result.discardedMana) discarded.push(`法力 ${result.discardedMana}`);
-  const statusEffects = [...(result.bossStatusEvents ?? []), ...(result.playerStatusEvents ?? [])]
-    .map(statusEventText)
-    .filter(Boolean);
-
+  const statusEffects = [
+    ...(result.enemyStatusEvents ?? result.bossStatusEvents ?? []),
+    ...(result.playerStatusEvents ?? []),
+  ].map(statusEventText).filter(Boolean);
   return [
-    `第 ${result.round} 回合：Boss 攻擊 **${result.bossAttack}**，護甲抵擋 **${result.armorUsed}**，受到 **${result.damageTaken}** 傷害。`,
+    `第 ${result.round} 回合：${result.enemyAction?.name ?? '敵人攻擊'} **${result.enemyAttack ?? result.bossAttack}**，護甲抵擋 **${result.armorUsed}**，受到 **${result.damageTaken}** 傷害。`,
     discarded.length ? `未使用的${discarded.join('、')}已消失。` : null,
     statusEffects.length ? `狀態效果：${statusEffects.join('、')}` : null,
   ].filter(Boolean).join('\n');
@@ -388,7 +432,7 @@ function lastResolutionText(state) {
 function activeStatusText(state) {
   const sides = [
     ['玩家', state.player.activeStatuses],
-    [state.boss.name, state.boss.activeStatuses],
+    [state.enemy.name, state.enemy.activeStatuses],
   ];
   const lines = sides.flatMap(([label, statuses]) => {
     if (!statuses?.length) return [];
@@ -400,13 +444,6 @@ function activeStatusText(state) {
     return `${label}：${text}`;
   });
   return lines.length ? lines.join('\n') : null;
-}
-
-function firstConsumable(state) {
-  const entry = state.player.inventory?.find(({ itemId, quantity }) => (
-    quantity > 0 && getItem(itemId).type === 'consumable'
-  ));
-  return entry ? { item: getItem(entry.itemId), quantity: entry.quantity } : null;
 }
 
 function skillUnavailable(state, skill) {
@@ -421,7 +458,6 @@ function skillUnavailable(state, skill) {
     const active = state.player.activeStatuses
       ?.find((status) => status.statusId === statusId);
     if (!active) return false;
-
     const definition = getStatus(statusId);
     if (definition.stacking.mode === 'refresh-duration') return true;
     return Number(active.stacks ?? 1) >= definition.stacking.maxStacks;
@@ -436,6 +472,19 @@ function itemUnavailable(state, item) {
   return lacksAction || onlyHealsFullHealth;
 }
 
+function rewardContent(choice) {
+  return choice.contentType === 'skill'
+    ? getSkill(choice.contentId)
+    : getItem(choice.contentId);
+}
+
+function rewardDescription(choice, content) {
+  if (choice.contentType === 'skill') {
+    return `技能｜法力消耗 ${content.cost}\n${content.description}`;
+  }
+  return `${itemTypeLabel(content)}\n${content.description}`;
+}
+
 function statusEventText(event) {
   const status = getStatus(event.statusId);
   if (event.type === 'damage') return `${status.emoji}${status.name}造成 ${event.amount} 傷害`;
@@ -444,18 +493,59 @@ function statusEventText(event) {
 }
 
 function itemTypeLabel(item) {
-  if (item.type === 'equipment') return '裝備（開局自動穿戴）';
+  if (item.type === 'equipment') return '裝備（戰鬥開始時自動生效）';
   return '消耗品（戰鬥中使用）';
 }
 
 function rankLabel(rank) {
   if (rank === 'boss') return '【BOSS】';
   if (rank === 'elite') return '【菁英】';
-  return '';
+  return '【普通】';
 }
 
 function healthBar(current, maximum, filledEmoji) {
   const segments = 10;
   const filled = maximum === 0 ? 0 : Math.ceil((current / maximum) * segments);
   return `${filledEmoji.repeat(filled)}${'⬛'.repeat(segments - filled)}`;
+}
+
+function actionRow(components) {
+  return { type: COMPONENT_TYPE.ACTION_ROW, components };
+}
+
+function button({ customId, label, emoji, style, disabled = false }) {
+  return {
+    type: COMPONENT_TYPE.BUTTON,
+    custom_id: customId,
+    label,
+    emoji: { name: emoji },
+    style,
+    disabled,
+  };
+}
+
+function abandonButton(gameId) {
+  return button({
+    customId: gameCustomId(gameId, 'abandon'),
+    label: '放棄遊戲',
+    emoji: '🏳️',
+    style: BUTTON_STYLE.DANGER,
+  });
+}
+
+function gameCustomId(gameId, action, value) {
+  return ['slotbattle', gameId, action, value].filter((entry) => (
+    entry !== undefined && entry !== null && entry !== ''
+  )).join(':');
+}
+
+function chunk(values, size) {
+  return Array.from(
+    { length: Math.ceil(values.length / size) },
+    (_, index) => values.slice(index * size, (index + 1) * size),
+  );
+}
+
+function namesFor(ids, resolver) {
+  return ids.map((id) => resolver(id).name);
 }

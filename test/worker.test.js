@@ -121,7 +121,7 @@ test('開始指令會直接回傳遊戲面板，不再呼叫Discord Webhook', as
   const body = await response.json();
 
   assert.equal(body.type, 4);
-  assert.equal(body.data.embeds[0].title, '🎰 拉霸戰鬥｜第 1 回合');
+  assert.equal(body.data.embeds[0].title, '🎰 地區 1｜第 1 回合');
   assert.equal(body.data.components[0].components[0].type, 2);
 });
 
@@ -210,7 +210,7 @@ test('投入按鈕會開啟Modal，送出數字後直接更新戰鬥訊息', asy
   );
   const body = await response.json();
   assert.equal(body.type, 7);
-  assert.equal(body.data.embeds[0].title, '🎰 拉霸戰鬥｜第 1 回合');
+  assert.equal(body.data.embeds[0].title, '🎰 地區 1｜第 1 回合');
 });
 
 test('開局配置選單會保存選擇並更新私人訊息', async () => {

@@ -17,15 +17,8 @@ export const ENCOUNTER_TABLES = createCatalog([
     id: 'ruins-elite-encounter',
     pools: [
       {
-        weight: 70,
+        weight: 100,
         filter: { requiredTags: ['enemy', 'elite', 'ruins'] },
-      },
-      {
-        weight: 30,
-        filter: {
-          requiredTags: ['enemy', 'ruins'],
-          excludedTags: ['elite', 'boss'],
-        },
       },
     ],
   },
