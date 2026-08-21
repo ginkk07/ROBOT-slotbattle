@@ -109,39 +109,38 @@ test('規則指令會立即回傳非同步之外的Discord訊息', async () => {
   assert.equal(body.data.embeds[0].title, '🎰 拉霸戰鬥規則');
 });
 
-test('開始指令會先延遲回應，再以Webhook更新遊戲面板', async () => {
+test('開始指令會直接回傳遊戲面板，不再呼叫Discord Webhook', async () => {
   const store = new MemoryGameStore();
-  const calls = [];
-  const background = [];
   const worker = createWorker({
     verifyRequest: async () => true,
     storeFactory: () => store,
-    fetchImpl: async (url, options) => {
-      calls.push({ url, options });
-      return new Response(JSON.stringify({ ok: true }), {
-        headers: { 'content-type': 'application/json' },
-      });
-    },
   });
-  const context = {
-    waitUntil(promise) {
-      background.push(promise);
-    },
-  };
 
   const response = await worker.fetch(interactionRequest(commandInteraction('start')),
-    ENVIRONMENT, context);
-  const deferred = await response.json();
-  await Promise.all(background);
+    ENVIRONMENT, {});
+  const body = await response.json();
 
-  assert.equal(deferred.type, 5);
-  assert.equal(calls.length, 1);
-  assert.match(calls[0].url, /\/messages\/@original$/);
-  assert.equal(calls[0].options.method, 'PATCH');
+  assert.equal(body.type, 4);
+  assert.equal(body.data.embeds[0].title, '🎰 拉霸戰鬥｜第 1 回合');
+  assert.equal(body.data.components[0].components[0].type, 2);
+});
 
-  const payload = JSON.parse(calls[0].options.body);
-  assert.equal(payload.embeds[0].title, '🎰 拉霸戰鬥｜第 1 回合');
-  assert.equal(payload.components[0].components[0].type, 2);
+test('玩家資料指令會直接回傳私人訊息', async () => {
+  const worker = createWorker({
+    verifyRequest: async () => true,
+    storeFactory: () => new MemoryGameStore(),
+  });
+
+  const response = await worker.fetch(
+    interactionRequest(commandInteraction('profile')),
+    ENVIRONMENT,
+    {},
+  );
+  const body = await response.json();
+
+  assert.equal(body.type, 4);
+  assert.equal(body.data.flags, 64);
+  assert.equal(body.data.embeds[0].title, '🧭 Roguelike 玩家資料');
 });
 
 test('Google背景同步不會延後Discord戰鬥面板', async () => {
@@ -151,22 +150,12 @@ test('Google背景同步不會延後Discord戰鬥面板', async () => {
   const mirrorTask = new Promise((resolve) => {
     finishMirror = resolve;
   });
-  let webhookEdited;
-  const editSeen = new Promise((resolve) => {
-    webhookEdited = resolve;
-  });
 
   const worker = createWorker({
     verifyRequest: async () => true,
     storeFactory: (environment, { enqueue }) => {
       enqueue(mirrorTask);
       return store;
-    },
-    fetchImpl: async () => {
-      webhookEdited();
-      return new Response(JSON.stringify({ ok: true }), {
-        headers: { 'content-type': 'application/json' },
-      });
     },
   });
 
@@ -175,9 +164,8 @@ test('Google背景同步不會延後Discord戰鬥面板', async () => {
     ENVIRONMENT,
     { waitUntil: (promise) => background.push(promise) },
   );
-  assert.equal((await response.json()).type, 5);
+  assert.equal((await response.json()).type, 4);
 
-  await editSeen;
   let finished = false;
   background[0].then(() => {
     finished = true;
@@ -189,40 +177,27 @@ test('Google背景同步不會延後Discord戰鬥面板', async () => {
   await Promise.all(background);
 });
 
-test('按鈕互動會先確認，再更新原本的戰鬥訊息', async () => {
+test('按鈕互動會直接更新原本的戰鬥訊息', async () => {
   const store = new MemoryGameStore();
-  const calls = [];
   const worker = createWorker({
     verifyRequest: async () => true,
     storeFactory: () => store,
-    fetchImpl: async (url, options) => {
-      calls.push({ url, options });
-      return new Response(JSON.stringify({ ok: true }), {
-        headers: { 'content-type': 'application/json' },
-      });
-    },
   });
 
-  const startBackground = [];
-  await worker.fetch(interactionRequest(commandInteraction('start')), ENVIRONMENT, {
-    waitUntil: (promise) => startBackground.push(promise),
-  });
-  await Promise.all(startBackground);
-  const startPayload = JSON.parse(calls[0].options.body);
-  const customId = startPayload.components[0].components[0].custom_id;
+  const startResponse = await worker.fetch(
+    interactionRequest(commandInteraction('start')),
+    ENVIRONMENT,
+    {},
+  );
+  const startBody = await startResponse.json();
+  const customId = startBody.data.components[0].components[0].custom_id;
 
-  calls.length = 0;
-  const buttonBackground = [];
   const response = await worker.fetch(interactionRequest(componentInteraction(customId)),
-    ENVIRONMENT, {
-      waitUntil: (promise) => buttonBackground.push(promise),
-    });
-  const deferred = await response.json();
-  await Promise.all(buttonBackground);
+    ENVIRONMENT, {});
+  const body = await response.json();
 
-  assert.equal(deferred.type, 6);
-  assert.equal(calls[0].options.method, 'PATCH');
-  assert.match(calls[0].url, /\/messages\/@original$/);
+  assert.equal(body.type, 7);
+  assert.equal(body.data.embeds[0].title, '🎰 拉霸戰鬥｜第 1 回合');
 });
 
 function interactionRequest(payload) {

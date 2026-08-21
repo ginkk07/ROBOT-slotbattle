@@ -7,7 +7,6 @@ import {
 
 import { COMMAND_NAME } from './discord/commands.js';
 import { createGameController } from './discord/game-controller.js';
-import { DiscordInteractionWebhookClient } from './discord/webhook-client.js';
 import { createGameStore } from './persistence/game-store.js';
 
 const INTERACTION_PATHS = new Set(['/', '/interactions']);
@@ -21,7 +20,6 @@ export function createWorker({
   verifyRequest = verifyKey,
   storeFactory = createGameStore,
   controllerFactory = createGameController,
-  fetchImpl = fetch,
 } = {}) {
   return {
     async fetch(request, env, context) {
@@ -87,19 +85,17 @@ export function createWorker({
           context,
           storeFactory,
           controllerFactory,
-          fetchImpl,
         });
       }
 
       if (interaction.type === InteractionType.MESSAGE_COMPONENT) {
-        schedule(context, processButton({
+        return handleMessageComponent({
           interaction,
           env,
+          context,
           storeFactory,
           controllerFactory,
-          fetchImpl,
-        }));
-        return interactionResponse(InteractionResponseType.DEFERRED_UPDATE_MESSAGE);
+        });
       }
 
       return messageResponse({
@@ -116,7 +112,6 @@ async function handleApplicationCommand({
   context,
   storeFactory,
   controllerFactory,
-  fetchImpl,
 }) {
   const commandName = interaction.data?.name;
   const subcommand = interaction.data?.options?.find((option) => option.type === 1)?.name;
@@ -128,124 +123,60 @@ async function handleApplicationCommand({
     });
   }
 
-  if (subcommand === 'rules') {
-    try {
-      const controller = controllerFactory({ store: storeFactory(env) });
-      const result = await controller.handleCommand({
-        commandName,
-        subcommand,
-        userId: userIdFor(interaction),
-      });
-      return messageResponse({
-        ...result.payload,
-        flags: InteractionResponseFlags.EPHEMERAL,
-      });
-    } catch (error) {
-      return messageResponse(errorPayload(error, { ephemeral: true }));
-    }
-  }
-
-  schedule(context, processCommand({
-    interaction,
-    env,
-    storeFactory,
-    controllerFactory,
-    fetchImpl,
-    commandName,
-    subcommand,
-  }));
-
-  return interactionResponse(
-    InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
-    subcommand === 'profile'
-      ? { flags: InteractionResponseFlags.EPHEMERAL }
-      : undefined,
-  );
-}
-
-async function processCommand({
-  interaction,
-  env,
-  storeFactory,
-  controllerFactory,
-  fetchImpl,
-  commandName,
-  subcommand,
-}) {
-  const webhook = webhookClientFor(interaction, fetchImpl);
-  const backgroundTasks = [];
-
   try {
     const controller = controllerFactory({
-      store: storeFactory(env, {
-        enqueue: (task) => backgroundTasks.push(task),
-      }),
+      store: storeForRequest({ env, context, storeFactory }),
     });
     const result = await controller.handleCommand({
       commandName,
       subcommand,
       userId: userIdFor(interaction),
     });
-    await webhook.editOriginal(result.payload);
+    return messageResponse({
+      ...result.payload,
+      ...(result.ephemeral ? { flags: InteractionResponseFlags.EPHEMERAL } : {}),
+    });
   } catch (error) {
     console.error('處理 Discord 指令失敗：', error);
-    await safelyEditError(webhook, error);
-  } finally {
-    await Promise.allSettled(backgroundTasks);
+    return messageResponse(errorPayload(error, { ephemeral: true }));
   }
 }
 
-async function processButton({
+async function handleMessageComponent({
   interaction,
   env,
+  context,
   storeFactory,
   controllerFactory,
-  fetchImpl,
 }) {
-  const webhook = webhookClientFor(interaction, fetchImpl);
-  const backgroundTasks = [];
-
   try {
     const controller = controllerFactory({
-      store: storeFactory(env, {
-        enqueue: (task) => backgroundTasks.push(task),
-      }),
+      store: storeForRequest({ env, context, storeFactory }),
     });
     const result = await controller.handleButton({
       customId: interaction.data?.custom_id,
       userId: userIdFor(interaction),
     });
 
-    if (result.payload) await webhook.editOriginal(result.payload);
-    for (const followUp of result.followUps) {
-      await webhook.followUp(followUp);
+    if (result.payload) {
+      return interactionResponse(
+        InteractionResponseType.UPDATE_MESSAGE,
+        result.payload,
+      );
     }
+
+    if (result.followUps.length) return messageResponse(result.followUps[0]);
+    return interactionResponse(InteractionResponseType.DEFERRED_UPDATE_MESSAGE);
   } catch (error) {
     console.error('處理 Discord 按鈕失敗：', error);
-    try {
-      await webhook.followUp(errorPayload(error, { ephemeral: true }));
-    } catch (reportError) {
-      console.error('無法回報 Discord 按鈕錯誤：', reportError);
-    }
-  } finally {
-    await Promise.allSettled(backgroundTasks);
+    return messageResponse(errorPayload(error, { ephemeral: true }));
   }
 }
 
-function webhookClientFor(interaction, fetchImpl) {
-  return new DiscordInteractionWebhookClient({
-    applicationId: interaction.application_id,
-    interactionToken: interaction.token,
-    fetchImpl,
+function storeForRequest({ env, context, storeFactory }) {
+  return storeFactory(env, {
+    enqueue: (task) => schedule(context, task),
   });
-}
-
-async function safelyEditError(webhook, error) {
-  try {
-    await webhook.editOriginal(errorPayload(error));
-  } catch (reportError) {
-    console.error('無法回報 Discord 指令錯誤：', reportError);
-  }
 }
 
 function errorPayload(error, { ephemeral = false } = {}) {

@@ -43,9 +43,13 @@
 Discord 指令／按鈕
     → Cloudflare Worker（驗證簽章與執行遊戲）
     → Cloudflare D1（即時讀寫）
-    → Cloudflare Worker 更新 Discord 訊息
+    → Cloudflare Worker 直接回傳 Discord 互動結果
     → Google Apps Script／試算表（背景同步玩家永久資料）
 ```
+
+Worker 會在 Discord 的第一次互動回覆中直接送出結果，避免再由
+Cloudflare 主動呼叫 Discord Webhook；D1 查詢保持在互動回覆的 3 秒期限內，
+Google 試算表同步則使用背景工作，不會延後遊戲畫面。
 
 Worker 執行時需要一個 D1 binding `DB`，以及三個 Cloudflare Secrets：
 
@@ -131,7 +135,7 @@ npm run worker:check
 src/game/data/       單位、技能、狀態、道具、事件、遭遇、掉落
 src/game/engines/    共用效果、狀態、抽選、事件與掉落引擎
 src/game/            拉霸、計分與目前 Boss 戰流程
-src/discord/         指令、共用控制器、Discord 訊息與 Webhook 回覆
+src/discord/         指令、共用控制器與 Discord 訊息
 src/worker.js        Cloudflare Workers HTTP Interactions 入口
 src/player/          永久玩家資料格式
 src/persistence/     D1／Google鏡像／記憶體存檔介面
