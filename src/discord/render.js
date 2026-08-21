@@ -46,30 +46,34 @@ export function renderGame(state) {
 
 export function renderProfile(profileRecord) {
   const profile = profileRecord.profile ?? profileRecord;
-  const selectedSkillId = profile.lastStartingLoadout?.skillIds?.[0];
-  const selectedItemId = profile.lastStartingLoadout?.itemIds?.[0];
-  const selectedSkill = selectedSkillId ? getSkill(selectedSkillId) : null;
-  const selectedItem = selectedItemId ? getItem(selectedItemId) : null;
+  const selectedSkillIds = profile.lastStartingLoadout?.skillIds ?? [];
+  const selectedItemIds = profile.lastStartingLoadout?.itemIds ?? [];
+  const selectedSkills = selectedSkillIds.map(getSkill);
+  const selectedItems = selectedItemIds.map(getItem);
 
   const embed = {
     color: COLORS.active,
     title: '🧭 開局配置',
     description: [
-      '從下方選單各選 **1 個技能**與 **1 個道具**。',
+      `從下方選單選擇 **${profile.startingSkillSlots} 個技能**與 **${profile.startingItemSlots} 個道具**。`,
       '選擇會立即保存，並在下一場新遊戲生效；進行中的遊戲不會改變。',
     ].join('\n'),
     fields: [
       {
         name: '目前技能',
-        value: selectedSkill
-          ? `${selectedSkill.emoji} **${selectedSkill.name}**｜${selectedSkill.cost} 法力\n${selectedSkill.description}`
+        value: selectedSkills.length
+          ? selectedSkills.map((skill) => (
+            `${skill.emoji} **${skill.name}**｜${skill.cost} 法力\n${skill.description}`
+          )).join('\n')
           : '尚未選擇',
         inline: false,
       },
       {
         name: '目前道具',
-        value: selectedItem
-          ? `${selectedItem.emoji} **${selectedItem.name}**｜${itemTypeLabel(selectedItem)}\n${selectedItem.description}`
+        value: selectedItems.length
+          ? selectedItems.map((item) => (
+            `${item.emoji} **${item.name}**｜${itemTypeLabel(item)}\n${item.description}`
+          )).join('\n')
           : '尚未選擇',
         inline: false,
       },
@@ -87,8 +91,8 @@ export function renderProfile(profileRecord) {
   return {
     embeds: [embed],
     components: [
-      actionRow([skillSelect(profile, selectedSkillId)]),
-      actionRow([itemSelect(profile, selectedItemId)]),
+      actionRow([skillSelect(profile, selectedSkillIds)]),
+      actionRow([itemSelect(profile, selectedItemIds)]),
     ],
   };
 }
@@ -329,13 +333,13 @@ function combatDescription(state) {
   ].join('\n');
 }
 
-function skillSelect(profile, selectedId) {
+function skillSelect(profile, selectedIds) {
   return {
     type: COMPONENT_TYPE.STRING_SELECT,
     custom_id: 'slotbattle-profile:skill',
-    placeholder: '選擇 1 個開局技能',
-    min_values: 1,
-    max_values: 1,
+    placeholder: `選擇 ${profile.startingSkillSlots} 個開局技能`,
+    min_values: profile.startingSkillSlots,
+    max_values: profile.startingSkillSlots,
     options: profile.unlockedStartingSkillIds.map((id) => {
       const skill = getSkill(id);
       return {
@@ -343,19 +347,19 @@ function skillSelect(profile, selectedId) {
         value: id,
         description: `${skill.cost} 法力｜${skill.description}`.slice(0, 100),
         emoji: { name: skill.emoji },
-        default: id === selectedId,
+        default: selectedIds.includes(id),
       };
     }),
   };
 }
 
-function itemSelect(profile, selectedId) {
+function itemSelect(profile, selectedIds) {
   return {
     type: COMPONENT_TYPE.STRING_SELECT,
     custom_id: 'slotbattle-profile:item',
-    placeholder: '選擇 1 個開局道具',
-    min_values: 1,
-    max_values: 1,
+    placeholder: `選擇 ${profile.startingItemSlots} 個開局道具`,
+    min_values: profile.startingItemSlots,
+    max_values: profile.startingItemSlots,
     options: profile.unlockedStartingItemIds.map((id) => {
       const item = getItem(id);
       return {
@@ -363,7 +367,7 @@ function itemSelect(profile, selectedId) {
         value: id,
         description: `${itemTypeLabel(item)}｜${item.description}`.slice(0, 100),
         emoji: { name: item.emoji },
-        default: id === selectedId,
+        default: selectedIds.includes(id),
       };
     }),
   };

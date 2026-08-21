@@ -10,10 +10,8 @@ import {
 } from '../src/game/engines/adventure-engine.js';
 import { drawEncounter } from '../src/game/engines/encounter-engine.js';
 import { rollRewardChoices } from '../src/game/engines/loot-engine.js';
-import {
-  BASIC_ATTACK_CHANCE,
-  selectMonsterIntent,
-} from '../src/game/engines/monster-action-engine.js';
+import { getMonsterActionRule } from '../src/game/data/monster-actions.js';
+import { selectMonsterIntent } from '../src/game/engines/monster-action-engine.js';
 import { getUnit } from '../src/game/data/units.js';
 
 test('普通與菁英遭遇表只會抽出指定階級', () => {
@@ -127,11 +125,9 @@ test('換區只線性增加敵人的基礎生命與基礎傷害', () => {
 });
 
 test('怪物依階級判斷普通攻擊機率，再等機率抽取持有技能', () => {
-  assert.deepEqual(BASIC_ATTACK_CHANCE, {
-    normal: 0.6,
-    elite: 0.4,
-    boss: 0.2,
-  });
+  assert.equal(getMonsterActionRule('normal').basicAttackChance, 0.6);
+  assert.equal(getMonsterActionRule('elite').basicAttackChance, 0.4);
+  assert.equal(getMonsterActionRule('boss').basicAttackChance, 0.2);
 
   const elite = scaleEnemyUnit(getUnit('elite-ruins-sentinel'), 1);
   const basic = selectMonsterIntent(elite, { rng: () => 0.39 });

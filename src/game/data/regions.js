@@ -8,11 +8,23 @@ export const REGIONS = createCatalog([
     normalEncounterTableId: 'ruins-normal-encounter',
     eliteEncounterTableId: 'ruins-elite-encounter',
     bossEncounterTableId: 'ruins-boss-encounter',
-    baseEliteChance: 0.12,
-    eventChance: 0.2,
-    bossLockedProgress: 4,
-    bossChancePerProgress: 0.07,
-    powerPerDepth: 0.2,
+    encounterRules: {
+      boss: {
+        minimumCompletedEncounters: 4,
+        chancePerCompletedEncounter: 0.07,
+      },
+      event: {
+        chance: 0.2,
+        allowOnFirstEncounter: false,
+      },
+      elite: {
+        baseChance: 0.12,
+      },
+    },
+    scaling: {
+      maxHpPerDepth: 0.2,
+      baseDamagePerDepth: 0.2,
+    },
   },
 ], '地區庫');
 

@@ -1,9 +1,12 @@
 import { ACHIEVEMENTS } from './achievements.js';
 import { ENCOUNTER_TABLES } from './encounters.js';
+import { EVENT_RULES } from './event-rules.js';
 import { EVENTS } from './events.js';
 import { ITEMS } from './items.js';
 import { LOOT_TABLES } from './loot-tables.js';
+import { MONSTER_ACTION_RULES } from './monster-actions.js';
 import { MONSTER_SKILLS } from './monster-skills.js';
+import { PLAYER_PROGRESSION_RULES } from './player-progression.js';
 import { ContentRarity, EventRarity } from './rarities.js';
 import { REGIONS } from './regions.js';
 import { SKILLS } from './skills.js';
@@ -26,8 +29,11 @@ export function validateGameData() {
     }
 
     if (unit.rank !== 'player') {
-      const expectedSkillCount = { normal: 1, elite: 2, boss: 3 }[unit.rank];
-      if (unit.skillIds.length !== expectedSkillCount) {
+      const expectedSkillCount = MONSTER_ACTION_RULES[unit.rank]
+        ?.requiredSkillCount;
+      if (expectedSkillCount === undefined) {
+        errors.push(`單位 ${unit.id} 的怪物階級沒有行動規則：${unit.rank}`);
+      } else if (unit.skillIds.length !== expectedSkillCount) {
         errors.push(`單位 ${unit.id} 必須有 ${expectedSkillCount} 個怪物技能`);
       }
       if (!Number.isFinite(unit.stats.attack) || unit.stats.attack <= 0) {
@@ -75,16 +81,34 @@ export function validateGameData() {
   }
 
   for (const table of Object.values(LOOT_TABLES)) {
-    if (table.choices !== 3) {
-      errors.push(`掉落表 ${table.id} 必須產生3個選項`);
+    if (!Number.isInteger(table.choices) || table.choices < 1) {
+      errors.push(`掉落表 ${table.id} 的 choices 必須是正整數`);
     }
-    const weights = Object.values(ContentRarity)
-      .map((rarity) => Number(table.rarityWeights?.[rarity] ?? -1));
-    if (weights.some((weight) => !Number.isFinite(weight) || weight < 0)) {
-      errors.push(`掉落表 ${table.id} 的稀有度權重不可為負數`);
+    validateRarityWeights(
+      table.rarityWeights,
+      Object.values(ContentRarity),
+      `掉落表 ${table.id} 的稀有度`,
+      errors,
+    );
+  }
+
+  validateRarityWeights(
+    EVENT_RULES.rarityWeights,
+    Object.values(EventRarity),
+    '奇遇稀有度',
+    errors,
+  );
+
+  for (const [rank, rule] of Object.entries(MONSTER_ACTION_RULES)) {
+    if (
+      !Number.isFinite(rule.basicAttackChance)
+      || rule.basicAttackChance < 0
+      || rule.basicAttackChance > 1
+    ) {
+      errors.push(`怪物階級 ${rank} 的 basicAttackChance 必須介於0與1`);
     }
-    if (weights.reduce((sum, weight) => sum + weight, 0) <= 0) {
-      errors.push(`掉落表 ${table.id} 至少需要一個稀有度權重`);
+    if (!Number.isInteger(rule.requiredSkillCount) || rule.requiredSkillCount < 0) {
+      errors.push(`怪物階級 ${rank} 的 requiredSkillCount 必須是非負整數`);
     }
   }
 
@@ -108,20 +132,59 @@ export function validateGameData() {
       checkReference(ENCOUNTER_TABLES, tableId, `地區 ${region.id} 的 ${key}`, errors);
     }
     for (const [key, probability] of Object.entries({
-      baseEliteChance: region.baseEliteChance,
-      eventChance: region.eventChance,
-      bossChancePerProgress: region.bossChancePerProgress,
+      'encounterRules.elite.baseChance': region.encounterRules?.elite?.baseChance,
+      'encounterRules.event.chance': region.encounterRules?.event?.chance,
+      'encounterRules.boss.chancePerCompletedEncounter': (
+        region.encounterRules?.boss?.chancePerCompletedEncounter
+      ),
     })) {
       if (!Number.isFinite(probability) || probability < 0 || probability > 1) {
         errors.push(`地區 ${region.id} 的 ${key} 必須介於0與1`);
       }
     }
-    if (!Number.isInteger(region.bossLockedProgress) || region.bossLockedProgress < 0) {
-      errors.push(`地區 ${region.id} 的 bossLockedProgress 必須是非負整數`);
+    const minimumBossProgress = region.encounterRules?.boss
+      ?.minimumCompletedEncounters;
+    if (!Number.isInteger(minimumBossProgress) || minimumBossProgress < 0) {
+      errors.push(`地區 ${region.id} 的 Boss 最低遭遇數必須是非負整數`);
     }
-    if (!Number.isFinite(region.powerPerDepth) || region.powerPerDepth < 0) {
-      errors.push(`地區 ${region.id} 的 powerPerDepth 必須是非負數`);
+    if (typeof region.encounterRules?.event?.allowOnFirstEncounter !== 'boolean') {
+      errors.push(`地區 ${region.id} 的 allowOnFirstEncounter 必須是布林值`);
     }
+    for (const [key, growth] of Object.entries({
+      maxHpPerDepth: region.scaling?.maxHpPerDepth,
+      baseDamagePerDepth: region.scaling?.baseDamagePerDepth,
+    })) {
+      if (!Number.isFinite(growth) || growth < 0) {
+        errors.push(`地區 ${region.id} 的 scaling.${key} 必須是非負數`);
+      }
+    }
+  }
+
+  for (const skillId of PLAYER_PROGRESSION_RULES.defaultUnlockedStartingSkillIds) {
+    checkReference(SKILLS, skillId, '預設開局技能', errors);
+  }
+  for (const itemId of PLAYER_PROGRESSION_RULES.defaultUnlockedStartingItemIds) {
+    checkReference(ITEMS, itemId, '預設開局道具', errors);
+  }
+  for (const [key, slots] of Object.entries({
+    startingSkillSlots: PLAYER_PROGRESSION_RULES.startingSkillSlots,
+    startingItemSlots: PLAYER_PROGRESSION_RULES.startingItemSlots,
+  })) {
+    if (!Number.isInteger(slots) || slots < 1) {
+      errors.push(`玩家開局規則 ${key} 必須是正整數`);
+    }
+  }
+  if (
+    PLAYER_PROGRESSION_RULES.startingSkillSlots
+    > PLAYER_PROGRESSION_RULES.defaultUnlockedStartingSkillIds.length
+  ) {
+    errors.push('開局技能欄位不可多於預設解鎖技能數');
+  }
+  if (
+    PLAYER_PROGRESSION_RULES.startingItemSlots
+    > PLAYER_PROGRESSION_RULES.defaultUnlockedStartingItemIds.length
+  ) {
+    errors.push('開局道具欄位不可多於預設解鎖道具數');
   }
 
   for (const achievement of Object.values(ACHIEVEMENTS)) {
@@ -142,4 +205,14 @@ export function validateGameData() {
 
 function checkReference(catalog, id, source, errors) {
   if (!catalog[id]) errors.push(`${source} 指向不存在的 id：${id}`);
+}
+
+function validateRarityWeights(weights, rarities, source, errors) {
+  const values = rarities.map((rarity) => Number(weights?.[rarity] ?? -1));
+  if (values.some((weight) => !Number.isFinite(weight) || weight < 0)) {
+    errors.push(`${source}權重不可為負數`);
+  }
+  if (values.reduce((sum, weight) => sum + weight, 0) <= 0) {
+    errors.push(`${source}至少需要一個大於0的權重`);
+  }
 }

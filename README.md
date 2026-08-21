@@ -18,7 +18,7 @@
 - 玩家可在多次拉霸之間使用技能或消耗品；裝備在每場戰鬥開始時自動生效。
 - 玩家按下「回合結束」後敵人才會執行已預告的行動；未使用的行動點、護甲與法力不保留。
 
-玩家版 `/slotbattle rules` 維持精簡操作說明；完整數值、機率及資料結構記錄在 [`docs/combat-v2.md`](docs/combat-v2.md)。
+玩家版 `/slotbattle rules` 維持精簡操作說明；完整數值與流程記錄在 [`docs/combat-v2.md`](docs/combat-v2.md)，新增或調整內容時請依照 [`docs/content-management.md`](docs/content-management.md)。
 
 ## 冒險流程
 
@@ -90,12 +90,15 @@
 | 單位庫 | `src/game/data/units.js` | 玩家、普通怪、菁英怪、Boss、階級與基礎能力 |
 | 玩家技能庫 | `src/game/data/skills.js` | 法力成本、稀有度、效果與掉落條件 |
 | 怪物技能庫 | `src/game/data/monster-skills.js` | 怪物技能倍率與額外效果，與玩家技能完全分離 |
+| 怪物行動規則 | `src/game/data/monster-actions.js` | 各階級普通攻擊率、技能率與技能數 |
 | 狀態庫 | `src/game/data/statuses.js` | 燃燒、暈眩、攻擊強化及抗性規則 |
 | 道具庫 | `src/game/data/items.js` | 消耗品、裝備、稀有度與共用效果 |
 | 地區／遭遇 | `src/game/data/regions.js`、`encounters.js` | Boss、奇遇、菁英與普通怪的判定參數 |
 | 奇遇庫 | `src/game/data/events.js` | 固定稀有度系統與事件結果 |
+| 奇遇規則 | `src/game/data/event-rules.js` | 獨立的奇遇稀有度權重 |
 | 掉落表 | `src/game/data/loot-tables.js` | 各怪物階級的三選一獨立稀有度權重 |
 | 成就庫 | `src/game/data/achievements.js` | 永久成就條件與開局內容解鎖 |
+| 開局規則 | `src/game/data/player-progression.js` | 預設解鎖與技能／道具欄位數 |
 
 內容定義皆為版本化唯讀資料，不寫入 D1。奇遇目前各稀有度只有一個不改變數值的暫用事件，等待正式事件效果設計。
 

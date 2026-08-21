@@ -1,21 +1,12 @@
 import { getMonsterSkill } from '../data/monster-skills.js';
-import { UnitRank } from '../data/units.js';
+import { getMonsterActionRule } from '../data/monster-actions.js';
 import { pickWeighted } from './weighted-random.js';
 
-export const BASIC_ATTACK_CHANCE = Object.freeze({
-  [UnitRank.NORMAL]: 0.6,
-  [UnitRank.ELITE]: 0.4,
-  [UnitRank.BOSS]: 0.2,
-});
-
 export function selectMonsterIntent(unit, { rng = Math.random } = {}) {
-  const basicAttackChance = BASIC_ATTACK_CHANCE[unit.rank];
-  if (basicAttackChance === undefined) {
-    throw new RangeError(`無法替 ${unit.rank} 階級選擇怪物行動`);
-  }
+  const rule = getMonsterActionRule(unit.rank);
 
   const roll = probabilityRoll(rng);
-  if (roll < basicAttackChance || unit.skillIds.length === 0) {
+  if (roll < rule.basicAttackChance || unit.skillIds.length === 0) {
     return {
       type: 'basic-attack',
       name: '普通攻擊',

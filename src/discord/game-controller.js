@@ -189,21 +189,27 @@ async function handleProfileSelection({
   busyProfiles.add(userId);
   try {
     const [, category] = customId.split(':');
-    const selectedId = values[0];
-    if (!selectedId) throw new Error('沒有收到選擇內容');
+    const selectedIds = [...new Set(values)];
+    if (selectedIds.length === 0) throw new Error('沒有收到選擇內容');
 
     const record = await ensureCurrentProfile(store, userId);
     const profile = structuredClone(record.profile);
     if (category === 'skill') {
-      if (!profile.unlockedStartingSkillIds.includes(selectedId)) {
+      if (selectedIds.length !== profile.startingSkillSlots) {
+        throw new Error(`必須選擇 ${profile.startingSkillSlots} 個技能`);
+      }
+      if (!selectedIds.every((id) => profile.unlockedStartingSkillIds.includes(id))) {
         throw new Error('這個技能尚未解鎖');
       }
-      profile.lastStartingLoadout.skillIds = [selectedId];
+      profile.lastStartingLoadout.skillIds = selectedIds;
     } else if (category === 'item') {
-      if (!profile.unlockedStartingItemIds.includes(selectedId)) {
+      if (selectedIds.length !== profile.startingItemSlots) {
+        throw new Error(`必須選擇 ${profile.startingItemSlots} 個道具`);
+      }
+      if (!selectedIds.every((id) => profile.unlockedStartingItemIds.includes(id))) {
         throw new Error('這個道具尚未解鎖');
       }
-      profile.lastStartingLoadout.itemIds = [selectedId];
+      profile.lastStartingLoadout.itemIds = selectedIds;
     } else {
       throw new Error('未知的開局配置類型');
     }

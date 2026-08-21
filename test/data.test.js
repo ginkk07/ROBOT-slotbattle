@@ -2,7 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { getItem } from '../src/game/data/items.js';
+import { EVENT_RULES } from '../src/game/data/event-rules.js';
+import { getMonsterActionRule } from '../src/game/data/monster-actions.js';
 import { getMonsterSkill } from '../src/game/data/monster-skills.js';
+import { PLAYER_PROGRESSION_RULES } from '../src/game/data/player-progression.js';
+import { getRegion } from '../src/game/data/regions.js';
 import { getSkill } from '../src/game/data/skills.js';
 import { getStatus } from '../src/game/data/statuses.js';
 import { getUnit } from '../src/game/data/units.js';
@@ -55,4 +59,23 @@ test('玩家技能與道具共用effects，怪物技能使用獨立資料庫', (
 test('資料定義為唯讀，戰鬥不能誤改原始資料庫', () => {
   assert.equal(Object.isFrozen(getUnit('ruins-guardian')), true);
   assert.equal(Object.isFrozen(getUnit('ruins-guardian').tags), true);
+});
+
+test('可調整的全域平衡規則集中在資料層', () => {
+  const region = getRegion('ruins');
+
+  assert.deepEqual(EVENT_RULES.rarityWeights, {
+    common: 50,
+    rare: 30,
+    legendary: 20,
+  });
+  assert.equal(getMonsterActionRule('normal').basicAttackChance, 0.6);
+  assert.equal(getMonsterActionRule('boss').requiredSkillCount, 3);
+  assert.equal(region.encounterRules.boss.minimumCompletedEncounters, 4);
+  assert.equal(region.encounterRules.event.chance, 0.2);
+  assert.equal(region.encounterRules.elite.baseChance, 0.12);
+  assert.equal(region.scaling.maxHpPerDepth, 0.2);
+  assert.equal(region.scaling.baseDamagePerDepth, 0.2);
+  assert.equal(PLAYER_PROGRESSION_RULES.startingSkillSlots, 1);
+  assert.equal(PLAYER_PROGRESSION_RULES.startingItemSlots, 1);
 });

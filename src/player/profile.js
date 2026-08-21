@@ -1,19 +1,16 @@
 import { ITEMS } from '../game/data/items.js';
+import { PLAYER_PROGRESSION_RULES } from '../game/data/player-progression.js';
 import { SKILLS } from '../game/data/skills.js';
 
 export const PLAYER_SAVE_VERSION = 3;
 
-export const STARTING_SKILL_IDS = Object.freeze([
-  'life-recovery',
-  'power-strike',
-  'fire-imbue',
-]);
+export const STARTING_SKILL_IDS = (
+  PLAYER_PROGRESSION_RULES.defaultUnlockedStartingSkillIds
+);
 
-export const STARTING_ITEM_IDS = Object.freeze([
-  'healing-potion',
-  'fire-bomb',
-  'flame-sword',
-]);
+export const STARTING_ITEM_IDS = (
+  PLAYER_PROGRESSION_RULES.defaultUnlockedStartingItemIds
+);
 
 export function createDefaultProfile(playerId) {
   if (!playerId) throw new TypeError('建立玩家資料需要 playerId');
@@ -29,11 +26,17 @@ export function createDefaultProfile(playerId) {
       runsEnded: 0,
       unitsDefeated: 0,
     },
-    startingSkillSlots: 1,
-    startingItemSlots: 1,
+    startingSkillSlots: PLAYER_PROGRESSION_RULES.startingSkillSlots,
+    startingItemSlots: PLAYER_PROGRESSION_RULES.startingItemSlots,
     lastStartingLoadout: {
-      skillIds: [STARTING_SKILL_IDS[0]],
-      itemIds: [STARTING_ITEM_IDS[0]],
+      skillIds: STARTING_SKILL_IDS.slice(
+        0,
+        PLAYER_PROGRESSION_RULES.startingSkillSlots,
+      ),
+      itemIds: STARTING_ITEM_IDS.slice(
+        0,
+        PLAYER_PROGRESSION_RULES.startingItemSlots,
+      ),
     },
   };
 }
@@ -52,13 +55,15 @@ export function upgradePlayerProfile(value, playerId = value?.playerId) {
     Object.keys(ITEMS),
     STARTING_ITEM_IDS,
   );
-  const selectedSkill = firstAllowed(
+  const selectedSkills = allowedLoadoutIds(
     source.lastStartingLoadout?.skillIds,
     unlockedSkills,
+    PLAYER_PROGRESSION_RULES.startingSkillSlots,
   );
-  const selectedItem = firstAllowed(
+  const selectedItems = allowedLoadoutIds(
     source.lastStartingLoadout?.itemIds,
     unlockedItems,
+    PLAYER_PROGRESSION_RULES.startingItemSlots,
   );
 
   return {
@@ -73,11 +78,11 @@ export function upgradePlayerProfile(value, playerId = value?.playerId) {
       runsEnded: nonNegativeInteger(source.lifetimeStats?.runsEnded),
       unitsDefeated: nonNegativeInteger(source.lifetimeStats?.unitsDefeated),
     },
-    startingSkillSlots: 1,
-    startingItemSlots: 1,
+    startingSkillSlots: PLAYER_PROGRESSION_RULES.startingSkillSlots,
+    startingItemSlots: PLAYER_PROGRESSION_RULES.startingItemSlots,
     lastStartingLoadout: {
-      skillIds: [selectedSkill ?? unlockedSkills[0]],
-      itemIds: [selectedItem ?? unlockedItems[0]],
+      skillIds: selectedSkills,
+      itemIds: selectedItems,
     },
   };
 }
@@ -91,9 +96,10 @@ function uniqueKnownIds(current, known, defaults) {
   ])];
 }
 
-function firstAllowed(selected, unlocked) {
-  return (Array.isArray(selected) ? selected : [])
-    .find((id) => unlocked.includes(id));
+function allowedLoadoutIds(selected, unlocked, slots) {
+  const requested = (Array.isArray(selected) ? selected : [])
+    .filter((id) => unlocked.includes(id));
+  return [...new Set([...requested, ...unlocked])].slice(0, slots);
 }
 
 function uniqueStrings(values) {

@@ -1,15 +1,9 @@
 import { EVENTS } from '../data/events.js';
-import { EventRarity } from '../data/rarities.js';
+import { EVENT_RULES } from '../data/event-rules.js';
 import { getRegion } from '../data/regions.js';
 import { drawEncounter } from './encounter-engine.js';
 import { drawEvent } from './event-engine.js';
 import { pickWeighted } from './weighted-random.js';
-
-const EVENT_RARITY_WEIGHTS = Object.freeze({
-  [EventRarity.COMMON]: 50,
-  [EventRarity.RARE]: 30,
-  [EventRarity.LEGENDARY]: 20,
-});
 
 export function createAdventureProgress(regionId = 'ruins') {
   return {
@@ -42,8 +36,10 @@ export function drawNextAdventureNode(progress, { rng = Math.random } = {}) {
     );
   }
 
-  const eventAllowed = progress.completedEncounters > 0;
-  if (eventAllowed && probabilityRoll(rng) < region.eventChance) {
+  const eventRule = region.encounterRules.event;
+  const eventAllowed = eventRule.allowOnFirstEncounter
+    || progress.completedEncounters > 0;
+  if (eventAllowed && probabilityRoll(rng) < eventRule.chance) {
     const rarity = drawEventRarity(rng);
     const event = drawEvent(rarity, {
       events: Object.values(EVENTS),
@@ -60,7 +56,8 @@ export function drawNextAdventureNode(progress, { rng = Math.random } = {}) {
   }
 
   const eliteChance = clampProbability(
-    region.baseEliteChance + Number(progress.modifiers?.eliteChanceBonus ?? 0),
+    region.encounterRules.elite.baseChance
+      + Number(progress.modifiers?.eliteChanceBonus ?? 0),
   );
   const elite = probabilityRoll(rng) < eliteChance;
   const tableId = elite
@@ -75,9 +72,10 @@ export function drawNextAdventureNode(progress, { rng = Math.random } = {}) {
 }
 
 export function bossEncounterChance(progress, region = getRegion(progress.regionId)) {
-  if (progress.regionProgress < region.bossLockedProgress) return 0;
+  const rule = region.encounterRules.boss;
+  if (progress.regionProgress < rule.minimumCompletedEncounters) return 0;
   return clampProbability(
-    progress.regionProgress * region.bossChancePerProgress,
+    progress.regionProgress * rule.chancePerCompletedEncounter,
   );
 }
 
@@ -85,25 +83,35 @@ export function regionPowerMultiplier(
   depth,
   region = getRegion('ruins'),
 ) {
+  return regionScalingMultipliers(depth, region).maxHp;
+}
+
+export function regionScalingMultipliers(
+  depth,
+  region = getRegion('ruins'),
+) {
   if (!Number.isInteger(depth) || depth < 1) {
     throw new RangeError('地區深度必須是正整數');
   }
-  return 1 + ((depth - 1) * region.powerPerDepth);
+  return {
+    maxHp: statMultiplier(depth, region.scaling.maxHpPerDepth),
+    baseDamage: statMultiplier(depth, region.scaling.baseDamagePerDepth),
+  };
 }
 
 export function scaleEnemyUnit(unit, depth, region = getRegion('ruins')) {
-  const multiplier = regionPowerMultiplier(depth, region);
+  const multipliers = regionScalingMultipliers(depth, region);
   return {
     unitId: unit.id,
     name: unit.name,
     rank: unit.rank,
     tags: [...unit.tags],
-    hp: Math.ceil(unit.stats.maxHp * multiplier),
-    maxHp: Math.ceil(unit.stats.maxHp * multiplier),
-    baseDamage: Math.ceil(unit.stats.attack * multiplier),
+    hp: Math.ceil(unit.stats.maxHp * multipliers.maxHp),
+    maxHp: Math.ceil(unit.stats.maxHp * multipliers.maxHp),
+    baseDamage: Math.ceil(unit.stats.attack * multipliers.baseDamage),
     baseMaxHp: unit.stats.maxHp,
     baseDamageBeforeScaling: unit.stats.attack,
-    regionMultiplier: multiplier,
+    regionMultipliers: multipliers,
     skillIds: [...unit.skillIds],
     damageResistances: { ...unit.damageResistances },
     statusOverrides: structuredClone(unit.statusOverrides),
@@ -121,9 +129,13 @@ function combatNode(unit, depth, bossChance, region) {
 }
 
 function drawEventRarity(rng) {
-  const entries = Object.entries(EVENT_RARITY_WEIGHTS)
+  const entries = Object.entries(EVENT_RULES.rarityWeights)
     .map(([rarity, weight]) => ({ rarity, weight }));
   return pickWeighted(entries, rng).rarity;
+}
+
+function statMultiplier(depth, growthPerDepth) {
+  return 1 + ((depth - 1) * growthPerDepth);
 }
 
 function probabilityRoll(rng) {
