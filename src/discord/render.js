@@ -1,4 +1,3 @@
-import { DEFAULT_CONFIG } from '../game/config.js';
 import { getItem } from '../game/data/items.js';
 import { getSkill } from '../game/data/skills.js';
 import { getStatus } from '../game/data/statuses.js';
@@ -114,19 +113,17 @@ export function renderProfile(profileRecord) {
 export function renderRules() {
   const embed = {
     color: COLORS.active,
-    title: '🎰 拉霸戰鬥規則',
+    title: '🎰 拉霸戰鬥｜遊玩方式',
     description: [
-      `每回合取得 **${DEFAULT_CONFIG.actionPointsPerRound}點行動點**，最多拉霸 **${DEFAULT_CONFIG.maxSpinsPerRound}次**。你可以分批投入，也可以一次全押。`,
+      '使用 `/slotbattle start` 開始一場戰鬥。',
       '',
-      '每格機率：⚔️攻擊30%／🛡️防禦30%／✨技能30%／🍀幸運5%／💀不幸5%。',
+      '每回合可以**一次投入全部行動點**，也可以**分次投入**進行拉霸。',
       '',
-      '同類圖示的基礎值為：1個＝1點、2個＝3點、3個＝9點，再乘上本次投入的行動點。',
+      '牌面圖案包含：⚔️攻擊／🛡️防禦／✨技能／🍀幸運／💀不幸。',
       '',
-      '🍀幸運會將相同的基礎值同時加到攻擊、防禦、技能。三個💀會讓玩家本回合暈眩，所有資源消失並承受Boss完整攻擊。',
+      '拉霸會累積本回合的攻擊、防禦與技能效果。投入完成後會進行回合結算，也可以按「結束抽選」提前結算。',
       '',
-      `⚔️每點造成1傷害；🛡️每點抵銷1傷害；✨${DEFAULT_CONFIG.commands.skill.description}`,
-      '',
-      '所有行動點與指令點都只在當回合有效。',
+      '在生命歸零前擊敗 Boss 即可獲勝。需要重新開啟戰鬥面板時，使用 `/slotbattle resume`。',
     ].join('\n'),
   };
 

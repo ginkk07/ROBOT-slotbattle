@@ -69,7 +69,7 @@ test('規則指令會立即回傳非同步之外的Discord訊息', async () => {
 
   assert.equal(body.type, 4);
   assert.equal(body.data.flags, 64);
-  assert.equal(body.data.embeds[0].title, '🎰 拉霸戰鬥規則');
+  assert.equal(body.data.embeds[0].title, '🎰 拉霸戰鬥｜遊玩方式');
 });
 
 test('開始指令會先延遲回應，再以Webhook更新遊戲面板', async () => {

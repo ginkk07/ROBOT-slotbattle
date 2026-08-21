@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { commands } from '../src/discord/commands.js';
-import { renderGame, renderProfile } from '../src/discord/render.js';
+import { renderGame, renderProfile, renderRules } from '../src/discord/render.js';
 import { createGame } from '../src/game/engine.js';
 import { createDefaultProfile } from '../src/player/profile.js';
 
@@ -23,6 +23,16 @@ test('玩家資料訊息會顯示初始技能與道具欄位', () => {
   assert.match(embed.fields[0].name, /技能欄位/);
   assert.match(embed.fields[0].value, /生命回復/);
   assert.match(embed.fields[1].value, /生命藥水/);
+});
+
+test('遊玩方式只說明玩家操作，不顯示機率與計分公式', () => {
+  const embed = renderRules().embeds[0];
+
+  assert.equal(embed.title, '🎰 拉霸戰鬥｜遊玩方式');
+  assert.match(embed.description, /一次投入全部行動點/);
+  assert.match(embed.description, /分次投入/);
+  assert.match(embed.description, /⚔️攻擊／🛡️防禦／✨技能／🍀幸運／💀不幸/);
+  assert.doesNotMatch(embed.description, /30%|5%|1個＝|4點行動點|最多拉霸/);
 });
 
 test('遊戲訊息包含投入按鈕與控制按鈕', () => {
