@@ -40,9 +40,8 @@ export const ITEMS = createCatalog([
     type: 'equipment',
     slot: 'weapon',
     stackable: false,
-    description: '提高攻擊，並提供火焰武器被動效果。',
+    description: '裝備後，每次產生攻擊時額外造成4點物理傷害。',
     statModifiers: { attack: 4 },
-    passiveSkillIds: ['flame-impact'],
   },
 ], '道具庫');
 

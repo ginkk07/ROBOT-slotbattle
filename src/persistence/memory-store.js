@@ -50,11 +50,11 @@ export class MemoryGameStore {
 
   async getOrCreateProfile(playerId) {
     const current = this.profiles.get(playerId);
-    if (current) return clone(current);
+    if (current) return { ...clone(current), created: false };
 
     const record = profileRecord(createDefaultProfile(playerId), 1);
     this.profiles.set(playerId, record);
-    return clone(record);
+    return { ...clone(record), created: true };
   }
 
   async saveProfile(profile, { expectedRevision } = {}) {

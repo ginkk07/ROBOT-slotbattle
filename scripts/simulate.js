@@ -1,6 +1,14 @@
 import { randomInt } from 'node:crypto';
 
-import { createGame, GameStatus, placeBet } from '../src/game/engine.js';
+import { getSkill } from '../src/game/data/skills.js';
+import {
+  activateSkill,
+  createGame,
+  endPlayerTurn,
+  GameStatus,
+  isStunned,
+  placeBet,
+} from '../src/game/engine.js';
 
 const requestedRuns = Number.parseInt(process.argv[2] ?? '10000', 10);
 const runs = Number.isInteger(requestedRuns) && requestedRuns > 0
@@ -33,18 +41,12 @@ function simulate(strategy, iterations) {
     });
 
     while (state.status === GameStatus.ACTIVE && state.round <= 200) {
-      if (strategy === 'all-in') {
-        state = placeBet(state, state.resources.action, { rng });
-      } else if (strategy === 'split-twice') {
-        const wager = state.spinsUsed === 0
-          ? Math.ceil(state.resources.action / 2)
-          : state.resources.action;
+      for (const wager of wagersFor(strategy, state.resources.action)) {
+        if (state.status !== GameStatus.ACTIVE || isStunned(state)) break;
         state = placeBet(state, wager, { rng });
-      } else {
-        const spinsRemaining = state.config.maxSpinsPerRound - state.spinsUsed;
-        const wager = Math.ceil(state.resources.action / spinsRemaining);
-        state = placeBet(state, wager, { rng });
+        state = useHealingWhenPossible(state);
       }
+      if (state.status === GameStatus.ACTIVE) state = endPlayerTurn(state);
     }
 
     if (state.status === GameStatus.WON) summary.wins += 1;
@@ -53,6 +55,30 @@ function simulate(strategy, iterations) {
   }
 
   return summary;
+}
+
+function wagersFor(strategy, available) {
+  if (strategy === 'all-in') return [available];
+  if (strategy === 'split-twice') {
+    const first = Math.ceil(available / 2);
+    return [first, available - first].filter(Boolean);
+  }
+  return Array.from({ length: available }, () => 1);
+}
+
+function useHealingWhenPossible(state) {
+  const skillId = state.player.equippedSkillId;
+  const skill = getSkill(skillId);
+  let next = state;
+  while (
+    next.status === GameStatus.ACTIVE
+    && !isStunned(next)
+    && next.player.hp < next.player.maxHp
+    && next.resources.mana >= skill.cost
+  ) {
+    next = activateSkill(next, skillId);
+  }
+  return next;
 }
 
 function simulationConfigFromEnvironment() {

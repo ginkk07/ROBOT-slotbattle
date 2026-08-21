@@ -19,7 +19,7 @@ export const UNITS = createCatalog([
       defense: 0,
       actionPoints: 4,
     },
-    skillIds: ['life-recovery'],
+    skillIds: ['life-recovery', 'power-strike', 'fire-imbue'],
     damageResistances: {},
     statusOverrides: {},
   },

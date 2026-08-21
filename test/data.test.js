@@ -25,10 +25,13 @@ test('單位以rank與tags區分普通、菁英與Boss', () => {
 test('技能與道具共用effects資料格式', () => {
   assert.deepEqual(getSkill('life-recovery').effects[0], {
     type: 'heal',
-    amountPerPoint: 2,
+    amount: 5,
     target: 'self',
   });
+  assert.equal(getSkill('power-strike').cost, 2);
+  assert.equal(getSkill('fire-imbue').effects[0].statusId, 'fire-imbue');
   assert.equal(getItem('fire-bomb').effects[1].statusId, 'burning');
+  assert.equal(getItem('flame-sword').type, 'equipment');
   assert.equal(getStatus('burning').bossRule.mode, 'reduced');
 });
 

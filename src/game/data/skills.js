@@ -3,12 +3,42 @@ import { createCatalog, requireDefinition } from './catalog.js';
 export const SKILLS = createCatalog([
   {
     id: 'life-recovery',
-    name: '生命回復',
+    name: '治癒',
     emoji: '💚',
     availability: 'player',
-    description: '每點技能指令點恢復2點生命。',
+    cost: 3,
+    description: '立即回復5點生命。',
     effects: [
-      { type: 'heal', amountPerPoint: 2, target: 'self' },
+      { type: 'heal', amount: 5, target: 'self' },
+    ],
+  },
+  {
+    id: 'power-strike',
+    name: '強擊',
+    emoji: '💥',
+    availability: 'player',
+    cost: 2,
+    description: '立即對敵人造成5點物理傷害。',
+    effects: [
+      { type: 'damage', element: 'physical', amount: 5, target: 'enemy' },
+    ],
+  },
+  {
+    id: 'fire-imbue',
+    name: '火焰附加',
+    emoji: '🔥',
+    availability: 'player',
+    cost: 2,
+    description: '每次攻擊額外造成1點傷害，持續3回合。',
+    effects: [
+      {
+        type: 'apply-status',
+        statusId: 'fire-imbue',
+        target: 'self',
+        chance: 1,
+        duration: 3,
+        potency: 1,
+      },
     ],
   },
   {
@@ -26,6 +56,7 @@ export const SKILLS = createCatalog([
     name: '火焰衝擊',
     emoji: '🔥',
     availability: 'both',
+    cost: 3,
     description: '造成火焰傷害，並嘗試附加燃燒。',
     effects: [
       { type: 'damage', element: 'fire', amount: 6, target: 'enemy' },

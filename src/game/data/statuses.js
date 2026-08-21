@@ -13,6 +13,18 @@ export const BossRuleMode = Object.freeze({
 
 export const STATUSES = createCatalog([
   {
+    id: 'fire-imbue',
+    name: '火焰附加',
+    emoji: '🔥',
+    polarity: StatusPolarity.BUFF,
+    category: 'attack-trigger',
+    trigger: 'on-attack',
+    defaultDuration: 3,
+    stacking: { mode: 'refresh-duration', maxStacks: 1 },
+    effect: { type: 'bonus-damage', element: 'fire', amountPerPotency: 1 },
+    bossRule: { mode: BossRuleMode.NORMAL },
+  },
+  {
     id: 'burning',
     name: '燃燒',
     emoji: '🔥',

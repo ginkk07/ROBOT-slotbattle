@@ -38,7 +38,16 @@ test('可依Discord玩家ID找回進行中的戰鬥與永久資料', async () =>
   const profile = await store.getOrCreateProfile('player-1');
 
   assert.equal(session.state.id, 'resume-test');
-  assert.deepEqual(profile.profile.unlockedStartingSkillIds, ['life-recovery']);
+  assert.deepEqual(profile.profile.unlockedStartingSkillIds, [
+    'life-recovery',
+    'power-strike',
+    'fire-imbue',
+  ]);
+  assert.deepEqual(profile.profile.unlockedStartingItemIds, [
+    'healing-potion',
+    'fire-bomb',
+    'flame-sword',
+  ]);
   assert.deepEqual(profile.profile.lastStartingLoadout.itemIds, ['healing-potion']);
 
   await assert.rejects(

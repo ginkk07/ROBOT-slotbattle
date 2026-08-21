@@ -22,11 +22,10 @@ test('技能與道具使用同一套治療效果處理器', () => {
     effects: getSkill('life-recovery').effects,
     source: state.player,
     target: state.boss,
-    points: 3,
   });
 
   assert.equal(result.source.hp, 45);
-  assert.equal(result.events[0].requested, 6);
+  assert.equal(result.events[0].requested, 5);
   assert.equal(result.events[0].amount, 5);
   assert.equal(state.player.hp, 40);
 });

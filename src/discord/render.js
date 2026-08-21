@@ -2,7 +2,7 @@ import { DEFAULT_CONFIG } from '../game/config.js';
 import { getItem } from '../game/data/items.js';
 import { getSkill } from '../game/data/skills.js';
 import { getStatus } from '../game/data/statuses.js';
-import { GameStatus, getBossIntent } from '../game/engine.js';
+import { GameStatus, getBossIntent, isStunned } from '../game/engine.js';
 import { formatReels } from '../game/symbols.js';
 
 const COLORS = Object.freeze({
@@ -15,6 +15,8 @@ const COLORS = Object.freeze({
 const COMPONENT_TYPE = Object.freeze({
   ACTION_ROW: 1,
   BUTTON: 2,
+  STRING_SELECT: 3,
+  TEXT_INPUT: 4,
 });
 
 const BUTTON_STYLE = Object.freeze({
@@ -23,6 +25,10 @@ const BUTTON_STYLE = Object.freeze({
   SUCCESS: 3,
   DANGER: 4,
 });
+
+const TEXT_INPUT_STYLE = Object.freeze({ SHORT: 1 });
+
+export const WAGER_INPUT_ID = 'wager';
 
 export function renderGame(state) {
   const embed = {
@@ -45,8 +51,13 @@ export function renderGame(state) {
         value: resourceLine(state),
         inline: false,
       },
+      {
+        name: '攜帶內容',
+        value: loadoutLine(state),
+        inline: false,
+      },
     ],
-    footer: { text: '行動點與所有指令點都不會保留到下一回合' },
+    footer: { text: '行動點、護甲與法力都會在回合結束時清空' },
   };
 
   const lastSpin = lastSpinText(state);
@@ -54,9 +65,17 @@ export function renderGame(state) {
     embed.fields.push({ name: '🎰 最近一次拉霸', value: lastSpin, inline: false });
   }
 
+  if (state.lastAction && state.lastAction.type !== 'spin') {
+    embed.fields.push({
+      name: '最近行動',
+      value: state.lastAction.text,
+      inline: false,
+    });
+  }
+
   const lastResolution = lastResolutionText(state);
   if (lastResolution) {
-    embed.fields.push({ name: '📜 上回合結算', value: lastResolution, inline: false });
+    embed.fields.push({ name: '📜 上回合結果', value: lastResolution, inline: false });
   }
 
   const statusText = activeStatusText(state);
@@ -72,65 +91,88 @@ export function renderGame(state) {
 
 export function renderProfile(profileRecord) {
   const profile = profileRecord.profile ?? profileRecord;
-  const skills = profile.unlockedStartingSkillIds.map((id) => getSkill(id).name);
-  const items = profile.unlockedStartingItemIds.map((id) => getItem(id).name);
-  const loadoutSkills = profile.lastStartingLoadout?.skillIds
-    ?.map((id) => getSkill(id).name) ?? [];
-  const loadoutItems = profile.lastStartingLoadout?.itemIds
-    ?.map((id) => getItem(id).name) ?? [];
+  const selectedSkillId = profile.lastStartingLoadout?.skillIds?.[0];
+  const selectedItemId = profile.lastStartingLoadout?.itemIds?.[0];
+  const selectedSkill = selectedSkillId ? getSkill(selectedSkillId) : null;
+  const selectedItem = selectedItemId ? getItem(selectedItemId) : null;
 
   const embed = {
     color: COLORS.active,
-    title: '🧭 Roguelike 玩家資料',
-    description: '永久資料只影響開局選擇；冒險中的生命與道具會在該次冒險結束後清除。',
+    title: '🧭 開局配置',
+    description: [
+      '從下方選單各選 **1 個技能**與 **1 個道具**。',
+      '選擇會立即保存，並在下一場新戰鬥生效；進行中的戰鬥不會改變。',
+    ].join('\n'),
     fields: [
       {
-        name: `技能欄位　${profile.startingSkillSlots}`,
-        value: loadoutSkills.length ? loadoutSkills.join('、') : '尚未選擇',
-        inline: true,
-      },
-      {
-        name: `道具欄位　${profile.startingItemSlots}`,
-        value: loadoutItems.length ? loadoutItems.join('、') : '尚未選擇',
-        inline: true,
-      },
-      {
-        name: '已解鎖初始技能',
-        value: skills.join('、') || '無',
+        name: '目前技能',
+        value: selectedSkill
+          ? `${selectedSkill.emoji} **${selectedSkill.name}**｜${selectedSkill.cost} 法力\n${selectedSkill.description}`
+          : '尚未選擇',
         inline: false,
       },
       {
-        name: '已解鎖初始道具',
-        value: items.join('、') || '無',
+        name: '目前道具',
+        value: selectedItem
+          ? `${selectedItem.emoji} **${selectedItem.name}**｜${itemTypeLabel(selectedItem)}\n${selectedItem.description}`
+          : '尚未選擇',
         inline: false,
       },
     ],
-    footer: { text: `存檔版本 ${profile.saveVersion}` },
+    footer: {
+      text: `玩家存檔 v${profile.saveVersion}${profileRecord.revision ? `｜資料版本 ${profileRecord.revision}` : ''}`,
+    },
   };
 
-  return { embeds: [embed] };
+  return {
+    embeds: [embed],
+    components: [
+      actionRow([skillSelect(profile, selectedSkillId)]),
+      actionRow([itemSelect(profile, selectedItemId)]),
+    ],
+  };
 }
 
 export function renderRules() {
   const embed = {
     color: COLORS.active,
-    title: '🎰 拉霸戰鬥規則',
+    title: '🎰 拉霸戰鬥｜怎麼玩',
     description: [
-      `每回合取得 **${DEFAULT_CONFIG.actionPointsPerRound}點行動點**，最多拉霸 **${DEFAULT_CONFIG.maxSpinsPerRound}次**。你可以分批投入，也可以一次全押。`,
+      `每回合會取得 **${DEFAULT_CONFIG.actionPointsPerRound} 點行動點**。按下「投入點數」後，輸入想投入的點數；你可以一次投入，也可以分次投入。`,
       '',
-      '每格機率：⚔️攻擊30%／🛡️防禦30%／✨技能30%／🍀幸運5%／💀不幸5%。',
+      '牌面會出現 ⚔️攻擊、🛡️防禦、✨技能、🍀幸運與💀不幸。相同圖案越多、投入點數越多，效果就越強。',
       '',
-      '同類圖示的基礎值為：1個＝1點、2個＝3點、3個＝9點，再乘上本次投入的行動點。',
+      '拉霸後會立刻攻擊、獲得本回合護甲或累積法力。你可以在多次拉霸之間使用攜帶技能。',
       '',
-      '🍀幸運會將相同的基礎值同時加到攻擊、防禦、技能。三個💀會讓玩家本回合暈眩，所有資源消失並承受Boss完整攻擊。',
+      '使用 `/slotbattle profile` 可以各選 1 個開局技能與道具。消耗品可在戰鬥中直接使用；裝備會在開局時自動穿戴。',
       '',
-      `⚔️每點造成1傷害；🛡️每點抵銷1傷害；✨${DEFAULT_CONFIG.commands.skill.description}`,
+      '準備好承受 Boss 攻擊時，按「回合結束」。剩餘行動點與法力會消失，護甲會抵擋這次攻擊。',
       '',
-      '所有行動點與指令點都只在當回合有效。',
+      '如果轉出三個💀，本回合會暈眩並失去所有本回合資源，只能按「回合結束」。',
     ].join('\n'),
   };
 
   return { embeds: [embed] };
+}
+
+export function renderWagerModal(state) {
+  const maximum = state.resources.action;
+  return {
+    custom_id: gameCustomId(state.id, 'wager-submit'),
+    title: '投入行動點',
+    components: [
+      actionRow([{
+        type: COMPONENT_TYPE.TEXT_INPUT,
+        custom_id: WAGER_INPUT_ID,
+        style: TEXT_INPUT_STYLE.SHORT,
+        label: `輸入投入點數（1～${maximum}）`,
+        placeholder: `目前有 ${maximum} 點行動點`,
+        min_length: 1,
+        max_length: String(maximum).length,
+        required: true,
+      }]),
+    ],
+  };
 }
 
 function buildControls(state) {
@@ -138,8 +180,8 @@ function buildControls(state) {
     return [
       actionRow([
         button({
-          customId: customId(state.id, 'restart'),
-          label: '再來一場',
+          customId: gameCustomId(state.id, 'restart'),
+          label: '以相同配置再來一場',
           emoji: '🔄',
           style: BUTTON_STYLE.PRIMARY,
         }),
@@ -147,48 +189,93 @@ function buildControls(state) {
     ];
   }
 
-  const action = state.resources.action;
-  const noSpinsLeft = state.spinsUsed >= state.config.maxSpinsPerRound;
-
-  const wagerRow = actionRow([
-    wagerButton(state.id, 1, action < 1 || noSpinsLeft),
-    wagerButton(state.id, 2, action < 2 || noSpinsLeft),
-    wagerButton(state.id, 3, action < 3 || noSpinsLeft),
+  const stunned = isStunned(state);
+  const skill = getSkill(state.player.equippedSkillId ?? state.player.skillIds[0]);
+  const consumable = firstConsumable(state);
+  const actionComponents = [
     button({
-      customId: customId(state.id, 'bet', 'all'),
-      label: `全部投入（${action}）`,
-      emoji: '🔥',
+      customId: gameCustomId(state.id, 'wager'),
+      label: `投入點數（剩餘 ${state.resources.action}）`,
+      emoji: '🎟️',
       style: BUTTON_STYLE.PRIMARY,
-      disabled: action < 1 || noSpinsLeft,
-    }),
-  ]);
-
-  const utilityRow = actionRow([
-    button({
-      customId: customId(state.id, 'end'),
-      label: '結束抽選',
-      emoji: '⏹️',
-      style: BUTTON_STYLE.SUCCESS,
+      disabled: stunned || state.resources.action < 1,
     }),
     button({
-      customId: customId(state.id, 'abandon'),
-      label: '放棄戰鬥',
-      emoji: '🏳️',
-      style: BUTTON_STYLE.DANGER,
+      customId: gameCustomId(state.id, 'skill', skill.id),
+      label: `${skill.name}（${skill.cost}法力）`,
+      emoji: skill.emoji,
+      style: BUTTON_STYLE.SECONDARY,
+      disabled: stunned || skillUnavailable(state, skill),
     }),
-  ]);
+  ];
 
-  return [wagerRow, utilityRow];
+  if (consumable) {
+    actionComponents.push(button({
+      customId: gameCustomId(state.id, 'item', consumable.item.id),
+      label: `使用${consumable.item.name} ×${consumable.quantity}`,
+      emoji: consumable.item.emoji,
+      style: BUTTON_STYLE.SECONDARY,
+      disabled: stunned || itemUnavailable(state, consumable.item),
+    }));
+  }
+
+  return [
+    actionRow(actionComponents),
+    actionRow([
+      button({
+        customId: gameCustomId(state.id, 'end'),
+        label: '回合結束',
+        emoji: '⏹️',
+        style: BUTTON_STYLE.SUCCESS,
+      }),
+      button({
+        customId: gameCustomId(state.id, 'abandon'),
+        label: '放棄戰鬥',
+        emoji: '🏳️',
+        style: BUTTON_STYLE.DANGER,
+      }),
+    ]),
+  ];
 }
 
-function wagerButton(gameId, wager, disabled) {
-  return button({
-    customId: customId(gameId, 'bet', String(wager)),
-    label: `投入${wager}點`,
-    emoji: '🎟️',
-    style: BUTTON_STYLE.SECONDARY,
-    disabled,
-  });
+function skillSelect(profile, selectedId) {
+  return {
+    type: COMPONENT_TYPE.STRING_SELECT,
+    custom_id: 'slotbattle-profile:skill',
+    placeholder: '選擇 1 個開局技能',
+    min_values: 1,
+    max_values: 1,
+    options: profile.unlockedStartingSkillIds.map((id) => {
+      const skill = getSkill(id);
+      return {
+        label: skill.name,
+        value: id,
+        description: `${skill.cost} 法力｜${skill.description}`.slice(0, 100),
+        emoji: { name: skill.emoji },
+        default: id === selectedId,
+      };
+    }),
+  };
+}
+
+function itemSelect(profile, selectedId) {
+  return {
+    type: COMPONENT_TYPE.STRING_SELECT,
+    custom_id: 'slotbattle-profile:item',
+    placeholder: '選擇 1 個開局道具',
+    min_values: 1,
+    max_values: 1,
+    options: profile.unlockedStartingItemIds.map((id) => {
+      const item = getItem(id);
+      return {
+        label: item.name,
+        value: id,
+        description: `${itemTypeLabel(item)}｜${item.description}`.slice(0, 100),
+        emoji: { name: item.emoji },
+        default: id === selectedId,
+      };
+    }),
+  };
 }
 
 function actionRow(components) {
@@ -209,7 +296,7 @@ function button({ customId, label, emoji, style, disabled = false }) {
   };
 }
 
-function customId(gameId, action, value) {
+function gameCustomId(gameId, action, value) {
   return ['slotbattle', gameId, action, value].filter(Boolean).join(':');
 }
 
@@ -224,60 +311,78 @@ function descriptionFor(state) {
   if (state.status === GameStatus.WON) {
     return `你在第 **${state.round}** 回合擊敗了 **${state.boss.name}**。`;
   }
-
   if (state.status === GameStatus.LOST) {
     return `你在第 **${state.round}** 回合被 **${state.boss.name}** 擊敗。`;
   }
-
-  if (state.status === GameStatus.ABANDONED) {
-    return '本場測試已結束。';
+  if (state.status === GameStatus.ABANDONED) return '本場戰鬥已結束。';
+  if (isStunned(state)) {
+    return [
+      '**你陷入暈眩，本回合只能按「回合結束」。**',
+      `Boss 行動預告：造成 ${getBossIntent(state)} 點傷害`,
+    ].join('\n');
   }
-
   return [
-    `**Boss 行動預告：本回合將造成 ${getBossIntent(state)} 點傷害**`,
-    `本回合還能抽選 ${state.config.maxSpinsPerRound - state.spinsUsed} 次。`,
+    `**Boss 行動預告：造成 ${getBossIntent(state)} 點傷害**`,
+    '可繼續投入、使用技能／道具，或自行結束回合。',
   ].join('\n');
 }
 
 function resourceLine(state) {
   return [
     `🎟️ 行動 **${state.resources.action}**`,
-    `⚔️ 攻擊 **${state.resources.attack}**`,
-    `🛡️ 防禦 **${state.resources.defense}**`,
-    `✨ ${state.config.commands.skill.name} **${state.resources.skill}**`,
+    `🛡️ 護甲 **${state.resources.armor}**`,
+    `✨ 法力 **${state.resources.mana}**`,
   ].join('　');
+}
+
+function loadoutLine(state) {
+  const skill = getSkill(state.player.equippedSkillId ?? state.player.skillIds[0]);
+  const equipment = Object.values(state.player.equipment ?? {})
+    .map((id) => {
+      const item = getItem(id);
+      return `${item.emoji}${item.name}（已裝備）`;
+    });
+  const inventory = (state.player.inventory ?? []).map(({ itemId, quantity }) => {
+    const item = getItem(itemId);
+    return `${item.emoji}${item.name}×${quantity}`;
+  });
+  const items = [...equipment, ...inventory];
+  return `${skill.emoji}${skill.name}（${skill.cost}法力）\n${items.join('、') || '沒有道具'}`;
 }
 
 function lastSpinText(state) {
   if (!state.lastSpin) return null;
-
   if (state.lastSpin.stunned) {
-    return `${formatReels(state.lastSpin.reels)}\n三個不幸：本回合暈眩。`;
+    return `${formatReels(state.lastSpin.reels)}\n三個不幸：失去本回合資源並陷入暈眩。`;
   }
 
   const awarded = state.lastSpin.awarded;
+  const impact = state.lastImpact ?? {};
+  const bonuses = [];
+  if (impact.equipmentBonus) bonuses.push(`裝備 +${impact.equipmentBonus}`);
+  if (impact.statusBonus) bonuses.push(`狀態 +${impact.statusBonus}`);
   return [
     formatReels(state.lastSpin.reels),
-    `投入 **${state.lastSpin.wager}** 點 → ⚔️ +${awarded.attack}　🛡️ +${awarded.defense}　✨ +${awarded.skill}`,
+    `投入 **${state.lastSpin.wager}** 點｜⚔️ ${awarded.attack}　🛡️ ${awarded.defense}　✨ ${awarded.skill}`,
+    `立即結果：${state.lastAction?.text ?? '沒有產生效果'}${bonuses.length ? `（${bonuses.join('、')}）` : ''}`,
   ].join('\n');
 }
 
 function lastResolutionText(state) {
   const result = state.lastResolution;
   if (!result) return null;
-
-  if (result.stunned) {
-    return `第${result.round}回合暈眩，未執行任何指令，受到 **${result.damageTaken}** 點傷害。`;
-  }
-
-  const discarded = result.discardedAction > 0
-    ? `；未使用行動點 ${result.discardedAction} 點已消失`
-    : '';
+  const discarded = [];
+  if (result.discardedAction) discarded.push(`行動 ${result.discardedAction}`);
+  if (result.discardedMana) discarded.push(`法力 ${result.discardedMana}`);
+  const statusEffects = [...(result.bossStatusEvents ?? []), ...(result.playerStatusEvents ?? [])]
+    .map(statusEventText)
+    .filter(Boolean);
 
   return [
-    `造成 **${result.attackDamage + (result.skillDamage ?? 0)}** 傷害；恢復 **${result.healing}** 生命。`,
-    `防禦 **${result.defense}**／Boss攻擊 **${result.bossAttack}**／受到 **${result.damageTaken}** 傷害${discarded}。`,
-  ].join('\n');
+    `第 ${result.round} 回合：Boss 攻擊 **${result.bossAttack}**，護甲抵擋 **${result.armorUsed}**，受到 **${result.damageTaken}** 傷害。`,
+    discarded.length ? `未使用的${discarded.join('、')}已消失。` : null,
+    statusEffects.length ? `狀態效果：${statusEffects.join('、')}` : null,
+  ].filter(Boolean).join('\n');
 }
 
 function activeStatusText(state) {
@@ -289,12 +394,49 @@ function activeStatusText(state) {
     if (!statuses?.length) return [];
     const text = statuses.map((status) => {
       const definition = getStatus(status.statusId);
-      return `${definition.emoji}${definition.name}×${status.stacks}（${status.remainingTurns}回合）`;
+      const stackText = status.stacks > 1 ? `×${status.stacks}` : '';
+      return `${definition.emoji}${definition.name}${stackText}（${status.remainingTurns}回合）`;
     }).join('、');
     return `${label}：${text}`;
   });
-
   return lines.length ? lines.join('\n') : null;
+}
+
+function firstConsumable(state) {
+  const entry = state.player.inventory?.find(({ itemId, quantity }) => (
+    quantity > 0 && getItem(itemId).type === 'consumable'
+  ));
+  return entry ? { item: getItem(entry.itemId), quantity: entry.quantity } : null;
+}
+
+function skillUnavailable(state, skill) {
+  if (state.resources.mana < skill.cost) return true;
+  if (skill.effects.every((effect) => effect.type === 'heal' && effect.target === 'self')) {
+    return state.player.hp >= state.player.maxHp;
+  }
+  const selfStatuses = skill.effects
+    .filter((effect) => effect.type === 'apply-status' && effect.target === 'self')
+    .map((effect) => effect.statusId);
+  return selfStatuses.length > 0 && selfStatuses.every((statusId) => (
+    state.player.activeStatuses?.some((active) => active.statusId === statusId)
+  ));
+}
+
+function itemUnavailable(state, item) {
+  return item.effects?.every((effect) => effect.type === 'heal' && effect.target === 'self')
+    && state.player.hp >= state.player.maxHp;
+}
+
+function statusEventText(event) {
+  const status = getStatus(event.statusId);
+  if (event.type === 'damage') return `${status.emoji}${status.name}造成 ${event.amount} 傷害`;
+  if (event.type === 'heal') return `${status.emoji}${status.name}回復 ${event.amount} HP`;
+  return null;
+}
+
+function itemTypeLabel(item) {
+  if (item.type === 'equipment') return '裝備（開局自動穿戴）';
+  return '消耗品（戰鬥中使用）';
 }
 
 function rankLabel(rank) {
