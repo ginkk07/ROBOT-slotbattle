@@ -51,6 +51,7 @@ export function applyEffects({
         targetUnit: recipient,
         chance: effect.chance,
         duration: effect.duration,
+        stacks: effect.stacks,
         potency: effect.potency,
         rng,
       });
@@ -68,6 +69,7 @@ export function applyEffects({
         target: effect.target,
         applied: result.applied,
         reason: result.reason,
+        stacks: result.applied ? result.activeStatus.stacks : 0,
       });
       continue;
     }

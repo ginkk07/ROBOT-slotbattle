@@ -31,11 +31,16 @@ test('技能與道具共用effects資料格式', () => {
   assert.equal(getSkill('power-strike').cost, 2);
   assert.equal(getSkill('fire-imbue').effects[0].statusId, 'fire-imbue');
   assert.equal(getItem('fire-bomb').effects[1].statusId, 'burning');
+  assert.equal(getItem('fire-bomb').effects[1].stacks, 3);
+  assert.equal(getSkill('flame-impact').effects[0].amount, 3);
+  assert.equal(getSkill('flame-impact').effects[1].chance, 0.5);
+  assert.equal(getSkill('flame-impact').effects[1].stacks, 3);
   assert.equal(getItem('healing-potion').actionCost, 0);
   assert.equal(getItem('flame-sword').type, 'equipment');
   assert.equal(getItem('flame-sword').battleStartEffects[0].statusId, 'attack-up');
   assert.equal(getStatus('attack-up').stacking.mode, 'stack-potency');
-  assert.equal(getStatus('burning').bossRule.mode, 'reduced');
+  assert.equal(getStatus('burning').trigger, 'turn-start');
+  assert.equal(getStatus('burning').stacking.mode, 'stack-countdown');
 });
 
 test('資料定義為唯讀，戰鬥不能誤改原始資料庫', () => {

@@ -22,7 +22,7 @@ export const ITEMS = createCatalog([
     stackable: true,
     maxStack: 20,
     actionCost: 0,
-    description: '造成8點火焰傷害，並附加燃燒。',
+    description: '造成 8 點傷害，並附加 3 層[燃燒狀態]。',
     effects: [
       { type: 'damage', element: 'fire', amount: 8, target: 'enemy' },
       {
@@ -30,8 +30,8 @@ export const ITEMS = createCatalog([
         statusId: 'burning',
         target: 'enemy',
         chance: 1,
-        duration: 3,
-        potency: 2,
+        stacks: 3,
+        potency: 1,
       },
     ],
   },

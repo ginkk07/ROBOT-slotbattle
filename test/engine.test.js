@@ -161,19 +161,46 @@ test('燃焰之劍在戰鬥開始時取得可疊加的攻擊力狀態並持續3�
   );
 });
 
-test('火焰炸彈沿用Boss抗性並在回合結束觸發燃燒', () => {
+test('火焰炸彈附加3層燃燒並在回合開始造成層數傷害後減少1層', () => {
   let state = createGame({
     id: 'bomb-test',
     ownerId: 'player-1',
+    config: {
+      boss: { maxHp: 100, attackPattern: [0], damageResistances: {} },
+    },
     loadout: { skillIds: ['life-recovery'], itemIds: ['fire-bomb'] },
   });
   state = useItem(state, 'fire-bomb', { rng: () => 0 });
-  assert.equal(state.boss.hp, 54);
+  assert.equal(state.boss.hp, 92);
   assert.equal(state.boss.activeStatuses[0].statusId, 'burning');
+  assert.equal(state.boss.activeStatuses[0].stacks, 3);
 
   state = endPlayerTurn(state);
-  assert.equal(state.boss.hp, 53);
-  assert.equal(state.player.hp, 30);
+  assert.equal(state.boss.hp, 89);
+  assert.equal(state.boss.activeStatuses[0].stacks, 2);
+  state = endPlayerTurn(state);
+  assert.equal(state.boss.hp, 87);
+  assert.equal(state.boss.activeStatuses[0].stacks, 1);
+  state = endPlayerTurn(state);
+  assert.equal(state.boss.hp, 86);
+  assert.equal(state.boss.activeStatuses.length, 0);
+});
+
+test('火焰衝擊造成3點傷害並以50%機率附加3層燃燒', () => {
+  let state = createGame({
+    id: 'flame-impact-test',
+    ownerId: 'player-1',
+    config: {
+      boss: { maxHp: 100, attackPattern: [0], damageResistances: {} },
+    },
+    loadout: { skillIds: ['flame-impact'], itemIds: ['healing-potion'] },
+  });
+  state = placeBet(state, 1, { reels: [SKILL, SKILL, SKILL] });
+  state = activateSkill(state, 'flame-impact', { rng: () => 0.49 });
+
+  assert.equal(state.boss.hp, 97);
+  assert.equal(state.boss.activeStatuses[0].stacks, 3);
+  assert.equal(state.resources.mana, 6);
 });
 
 test('三個不幸不會自動換回合，玩家只能手動結束', () => {

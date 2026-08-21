@@ -30,7 +30,7 @@ test('技能與道具使用同一套治療效果處理器', () => {
   assert.equal(state.player.hp, 40);
 });
 
-test('火焰炸彈會計算Boss火焰抗性與燃燒效果降低', () => {
+test('火焰炸彈會計算Boss火焰抗性並附加3層燃燒', () => {
   const state = game();
   const result = applyEffects({
     effects: getItem('fire-bomb').effects,
@@ -42,6 +42,8 @@ test('火焰炸彈會計算Boss火焰抗性與燃燒效果降低', () => {
   assert.equal(result.target.hp, 54);
   assert.equal(result.events[0].resistance, 0.25);
   assert.equal(result.target.activeStatuses[0].statusId, 'burning');
+  assert.equal(result.target.activeStatuses[0].stacks, 3);
+  assert.equal(result.target.activeStatuses[0].remainingTurns, 3);
   assert.equal(result.target.activeStatuses[0].potency, 1);
 });
 
@@ -86,7 +88,7 @@ test('可疊加狀態遵守最大層數', () => {
   });
 
   assert.equal(merged[0].stacks, 5);
-  assert.equal(merged[0].remainingTurns, 3);
+  assert.equal(merged[0].remainingTurns, 5);
   assert.equal(merged[0].potency, 2);
 });
 

@@ -30,6 +30,9 @@ export function validateGameData() {
       if (effect.statusId) {
         checkReference(STATUSES, effect.statusId, `${source.id} 的效果`, errors);
       }
+      if (effect.stacks !== undefined && (!Number.isInteger(effect.stacks) || effect.stacks < 1)) {
+        errors.push(`${source.id} 的效果 stacks 必須是正整數`);
+      }
     }
     for (const skillId of source.passiveSkillIds ?? []) {
       checkReference(SKILLS, skillId, `道具 ${source.id} 的 passiveSkillIds`, errors);

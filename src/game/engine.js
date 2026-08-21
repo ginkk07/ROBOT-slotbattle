@@ -284,8 +284,12 @@ export function endPlayerTurn(state) {
   const wasStunned = isStunned(next);
   const discardedAction = next.resources.action;
   const discardedMana = next.resources.mana;
-  const bossStatus = resolveTurnEndStatuses(next.boss);
-  next.boss = bossStatus.unit;
+
+  const playerTurnEndStatus = resolveTriggeredStatuses(next.player, 'turn-end');
+  next.player = advanceStatusDurations(playerTurnEndStatus.unit);
+
+  const bossTurnStartStatus = resolveTriggeredStatuses(next.boss, 'turn-start');
+  next.boss = bossTurnStartStatus.unit;
 
   const bossAttack = next.boss.hp === 0 ? 0 : getBossIntent(next);
   const armorUsed = wasStunned
@@ -297,10 +301,15 @@ export function endPlayerTurn(state) {
   );
   next.player.hp -= damageTaken;
 
-  const playerStatus = next.player.hp > 0
-    ? resolveTurnEndStatuses(next.player)
-    : { unit: advanceStatusDurations(next.player), events: [] };
-  next.player = playerStatus.unit;
+  const bossTurnEndStatus = next.boss.hp > 0
+    ? resolveTriggeredStatuses(next.boss, 'turn-end')
+    : { unit: next.boss, events: [] };
+  next.boss = advanceStatusDurations(bossTurnEndStatus.unit);
+
+  const playerTurnStartStatus = next.player.hp > 0
+    ? resolveTriggeredStatuses(next.player, 'turn-start')
+    : { unit: next.player, events: [] };
+  next.player = playerTurnStartStatus.unit;
 
   next.lastResolution = {
     round: next.round,
@@ -310,8 +319,14 @@ export function endPlayerTurn(state) {
     armorUsed,
     bossAttack,
     damageTaken,
-    bossStatusEvents: bossStatus.events,
-    playerStatusEvents: playerStatus.events,
+    bossStatusEvents: [
+      ...bossTurnStartStatus.events,
+      ...bossTurnEndStatus.events,
+    ],
+    playerStatusEvents: [
+      ...playerTurnEndStatus.events,
+      ...playerTurnStartStatus.events,
+    ],
   };
   next.history.push({
     type: 'turn-resolution',
@@ -506,13 +521,13 @@ function itemActionCost(item) {
   return actionCost;
 }
 
-function resolveTurnEndStatuses(unit) {
+function resolveTriggeredStatuses(unit, trigger) {
   const next = structuredClone(unit);
   const events = [];
 
   for (const active of next.activeStatuses ?? []) {
     const definition = getStatus(active.statusId);
-    if (definition.trigger !== 'turn-end') continue;
+    if (definition.trigger !== trigger) continue;
     const requested = Number(definition.effect.amountPerPotency ?? 0)
       * Number(active.potency ?? 1)
       * Number(active.stacks ?? 1);
@@ -542,19 +557,38 @@ function resolveTurnEndStatuses(unit) {
       next.hp += amount;
       events.push({ type: 'heal', statusId: active.statusId, amount });
     }
+
+    if (definition.stacking.mode === 'stack-countdown') {
+      active.stacks = Math.max(0, Number(active.stacks ?? 1) - 1);
+      active.remainingTurns = active.stacks;
+      const latestEvent = events.at(-1);
+      if (latestEvent) latestEvent.remainingStacks = active.stacks;
+    }
   }
 
-  return { unit: advanceStatusDurations(next), events };
+  next.activeStatuses = (next.activeStatuses ?? [])
+    .filter((status) => Number(status.stacks ?? 1) > 0);
+  return { unit: next, events };
 }
 
 function advanceStatusDurations(unit) {
   const next = structuredClone(unit);
   next.activeStatuses = (next.activeStatuses ?? [])
-    .map((status) => ({
-      ...status,
-      remainingTurns: Number(status.remainingTurns) - 1,
-    }))
-    .filter((status) => status.remainingTurns > 0);
+    .map((status) => {
+      const definition = getStatus(status.statusId);
+      if (definition.stacking.mode === 'stack-countdown') return status;
+      return {
+        ...status,
+        remainingTurns: Number(status.remainingTurns) - 1,
+      };
+    })
+    .filter((status) => {
+      const definition = getStatus(status.statusId);
+      if (definition.stacking.mode === 'stack-countdown') {
+        return Number(status.stacks ?? 0) > 0;
+      }
+      return status.remainingTurns > 0;
+    });
   return next;
 }
 
@@ -585,7 +619,8 @@ function summarizeEffectEvents(events) {
     if (event.type === 'heal') return [`回復 ${event.amount} HP`];
     if (event.type === 'damage') return [`造成 ${event.amount} 傷害`];
     if (event.type === 'apply-status' && event.applied) {
-      return [`附加${getStatus(event.statusId).name}`];
+      const stackText = event.stacks > 1 ? `${event.stacks}層` : '';
+      return [`附加${stackText}${getStatus(event.statusId).name}`];
     }
     if (event.type === 'apply-status') return ['狀態未生效'];
     if (event.type === 'remove-status') return [`移除 ${event.removed} 個狀態`];

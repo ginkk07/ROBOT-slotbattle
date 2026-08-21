@@ -7,11 +7,16 @@ export function resolveStatusApplication({
   targetUnit,
   chance = 1,
   duration,
+  stacks = 1,
   potency = 1,
   rng = Math.random,
 }) {
   const definition = getStatus(statusId);
   const rule = effectiveRule(definition, targetUnit);
+
+  if (!Number.isInteger(stacks) || stacks < 1) {
+    throw new RangeError('狀態層數必須是正整數');
+  }
 
   if (rule.mode === BossRuleMode.IMMUNE) {
     return { applied: false, reason: 'immune', statusId, chance: 0 };
@@ -33,6 +38,9 @@ export function resolveStatusApplication({
     Math.ceil(baseDuration * (rule.durationMultiplier ?? 1)),
   );
   const finalPotency = potency * (rule.potencyMultiplier ?? 1);
+  const remainingTurns = definition.stacking.mode === 'stack-countdown'
+    ? stacks
+    : finalDuration;
 
   return {
     applied: true,
@@ -41,8 +49,8 @@ export function resolveStatusApplication({
     activeStatus: {
       statusId,
       sourceUnitId: sourceUnitId ?? null,
-      remainingTurns: finalDuration,
-      stacks: 1,
+      remainingTurns,
+      stacks,
       potency: finalPotency,
     },
   };
@@ -56,7 +64,14 @@ export function mergeActiveStatus(activeStatuses, incoming) {
   if (index === -1) return [...next, structuredClone(incoming)];
 
   const current = next[index];
-  if (definition.stacking.mode === 'stack-potency') {
+  if (definition.stacking.mode === 'stack-countdown') {
+    current.stacks = Math.min(
+      definition.stacking.maxStacks,
+      current.stacks + incoming.stacks,
+    );
+    current.potency = Math.max(current.potency, incoming.potency);
+    current.remainingTurns = current.stacks;
+  } else if (definition.stacking.mode === 'stack-potency') {
     current.stacks = Math.min(
       definition.stacking.maxStacks,
       current.stacks + incoming.stacks,
