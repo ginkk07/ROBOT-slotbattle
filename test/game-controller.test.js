@@ -82,7 +82,7 @@ test('擊敗敵人後先在原戰鬥面板確認，再顯示獎勵', async () =>
     userId: 'player-1',
     fields: { wager: '1' },
   });
-  assert.match(defeated.payload.embeds[0].fields[1].name, /HP　0\//);
+  assert.match(defeated.payload.embeds[0].fields[0].name, /HP　0\//);
   assert.deepEqual(
     defeated.payload.components[0].components.map((component) => component.label),
     ['確認'],

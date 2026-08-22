@@ -76,6 +76,11 @@ test('戰鬥面板使用自由投入、技能、道具與回合結束按鈕', ()
     payload.components[0].components[2].custom_id,
     'slotbattle:render-test:detail-item:fire-bomb',
   );
+  assert.match(payload.embeds[0].description, /行動預告：/);
+  assert.doesNotMatch(
+    JSON.stringify(payload.embeds[0]),
+    /冒險進度|總擊敗|目前配置|可繼續投入|回合結束時清空/,
+  );
   assert.doesNotMatch(labels.join('、'), /投入1點|投入2點|投入3點|全部投入/);
 });
 
@@ -89,16 +94,12 @@ test('裝備在面板顯示為已穿戴而不是使用按鈕', () => {
     },
   });
   const payload = renderGame(state);
-  const loadout = payload.embeds[0].fields.find((field) => field.name === '目前配置');
+  const player = payload.embeds[0].fields.find((field) => field.name.startsWith('👤'));
   const labels = payload.components.flatMap((row) => (
     row.components.map((component) => component.label)
   ));
 
-  assert.match(loadout.value, /燃焰之劍（已裝備）/);
-  assert.match(
-    payload.embeds[0].fields.find((field) => field.name === '玩家狀態').value,
-    /攻擊力＋1（3回合）/,
-  );
+  assert.match(player.value, /玩家狀態[\s\S]*攻擊力＋1（3回合）/);
   assert.ok(labels.includes('燃焰之劍'));
   assert.doesNotMatch(labels.join('、'), /使用燃焰之劍/);
 });
@@ -108,11 +109,32 @@ test('回合資源只使用符號與數值顯示', () => {
     id: 'resource-render-test',
     ownerId: 'player-1',
   }));
-  const resources = payload.embeds[0].fields
-    .find((field) => field.name === '本回合資源').value;
+  const player = payload.embeds[0].fields.find((field) => field.name.startsWith('👤'));
 
-  assert.equal(resources, '❇️ **4**　🛡️ **0**　✨ **0**');
-  assert.doesNotMatch(resources, /行動|護甲|法力/);
+  assert.match(player.value, /❇️ \*\*4\*\*　🛡️ \*\*0\*\*　✨ \*\*0\*\*/);
+  assert.doesNotMatch(player.value, /本回合資源|行動點|護甲：|法力：/);
+});
+
+test('拉霸結果只顯示實際傷害、護甲與法力', () => {
+  let state = createGame({
+    id: 'simple-spin-result',
+    ownerId: 'player-1',
+  });
+  state.player.activeStatuses.push({
+    statusId: 'power-strike-ready',
+    sourceUnitId: null,
+    remainingTurns: null,
+    stacks: 1,
+    potency: 3,
+  });
+  state = placeBet(state, 1, {
+    reels: [SymbolId.ATTACK, SymbolId.DEFENSE, SymbolId.SKILL],
+  });
+  const spin = renderGame(state).embeds[0].fields.find((field) => field.name === '\u200b');
+
+  assert.match(spin.value, /╔═══════════╗/);
+  assert.match(spin.value, /拉霸結果：造成 3 傷害／護甲 \+1／法力 \+1/);
+  assert.doesNotMatch(spin.value, /投入|強擊|狀態 \+|立即結果/);
 });
 
 test('技能詳情依目前可用性顯示使用與關閉按鈕', () => {
@@ -177,7 +199,7 @@ test('戰鬥勝利先顯示敵人生命0與確認按鈕，確認後才顯示獎�
   });
   const victoryPayload = renderGame(state);
 
-  assert.match(victoryPayload.embeds[0].fields[1].name, /HP　0\//);
+  assert.match(victoryPayload.embeds[0].fields[0].name, /HP　0\//);
   assert.deepEqual(
     victoryPayload.components[0].components.map((component) => component.label),
     ['確認'],
@@ -201,12 +223,12 @@ test('戰鬥面板會分開顯示玩家與敵人的狀態', () => {
     monsterRng: () => 0,
   });
   state = useItem(state, 'fire-bomb', { rng: () => 0 });
-  const fields = Object.fromEntries(renderGame(state).embeds[0].fields.map((field) => (
-    [field.name, field.value]
-  )));
+  const fields = renderGame(state).embeds[0].fields;
+  const enemy = fields.find((field) => field.name.startsWith('👹'));
+  const player = fields.find((field) => field.name.startsWith('👤'));
 
-  assert.match(fields['敵人狀態｜遺跡守衛'], /燃燒 ×3/);
-  assert.equal(fields['玩家狀態'], '無');
+  assert.match(enemy.value, /敵人狀態[\s\S]*燃燒 ×3/);
+  assert.match(player.value, /玩家狀態\*\*\n無/);
 });
 
 test('奇遇只顯示內文與選項，不會公開事件名稱', () => {
