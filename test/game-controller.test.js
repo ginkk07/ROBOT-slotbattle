@@ -140,7 +140,7 @@ test('其他玩家無法操作別人的戰鬥面板', async () => {
   );
 });
 
-test('技能按鈕先回傳私人詳情，可用時才提供使用按鈕', async () => {
+test('技能按鈕在原訊息顯示詳情，可用時才提供使用按鈕', async () => {
   const store = new MemoryGameStore();
   const controller = controllerFor(store, 'skill-detail-controller');
   await controller.handleCommand({
@@ -163,7 +163,7 @@ test('技能按鈕先回傳私人詳情，可用時才提供使用按鈕', async
     customId: 'slotbattle:skill-detail-controller:detail-skill:power-strike',
     userId: 'player-1',
   });
-  assert.equal(unavailable.ephemeral, true);
+  assert.equal(unavailable.ephemeral, false);
   assert.deepEqual(
     unavailable.payload.components[0].components.map((component) => component.label),
     ['關閉'],
@@ -193,7 +193,7 @@ test('技能按鈕先回傳私人詳情，可用時才提供使用按鈕', async
   )));
 });
 
-test('詳情關閉按鈕會清除私人說明內容', async () => {
+test('詳情關閉按鈕會在原訊息恢復戰鬥面板', async () => {
   const store = new MemoryGameStore();
   const controller = controllerFor(store, 'detail-close-controller');
   await controller.handleCommand({
@@ -206,8 +206,9 @@ test('詳情關閉按鈕會清除私人說明內容', async () => {
     customId: 'slotbattle:detail-close-controller:detail-close',
     userId: 'player-1',
   });
-  assert.equal(closed.payload.content, '已關閉技能／道具說明。');
-  assert.deepEqual(closed.payload.components, []);
+  assert.equal(closed.ephemeral, false);
+  assert.equal(closed.payload.embeds[0].title, '🎰 地區 1｜第 1 回合');
+  assert.ok(closed.payload.components.length > 0);
 });
 
 test('主動放棄會結算永久紀錄並清除本輪配置', async () => {

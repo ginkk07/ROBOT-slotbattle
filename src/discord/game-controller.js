@@ -6,10 +6,7 @@ import {
   renderWagerModal,
   WAGER_INPUT_ID,
 } from './render.js';
-import {
-  renderClosedContentDetail,
-  renderContentDetail,
-} from './content-detail.js';
+import { renderContentDetail } from './content-detail.js';
 import {
   abandonGame,
   activateSkill,
@@ -124,14 +121,11 @@ export function createGameController({
 
         if (action === 'detail-skill' || action === 'detail-item') {
           const contentType = action === 'detail-skill' ? 'skill' : 'item';
-          return handledResult(
-            renderContentDetail(session.state, contentType, value),
-            { ephemeral: true },
-          );
+          return handledResult(renderContentDetail(session.state, contentType, value));
         }
 
         if (action === 'detail-close') {
-          return handledResult(renderClosedContentDetail());
+          return handledResult(renderGame(session.state));
         }
 
         if (action === 'wager') {
