@@ -4,6 +4,7 @@ import {
   chooseEventOption,
   chooseReward,
   completeEvent,
+  confirmCombatVictory,
   continueWithoutReward,
   createGame,
   endPlayerTurn,
@@ -52,6 +53,10 @@ function simulate(strategy, iterations, turnLimit) {
     });
 
     while (state.status === GameStatus.ACTIVE && turns < turnLimit) {
+      if (state.phase === GamePhase.VICTORY_CONFIRM) {
+        state = confirmCombatVictory(state, { rewardRng: probabilityRng });
+        continue;
+      }
       if (state.phase === GamePhase.REWARD_CHOICE) {
         state = state.rewardChoices.length
           ? chooseReward(state, 0, {
