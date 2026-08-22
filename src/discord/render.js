@@ -141,7 +141,9 @@ export function renderWagerModal(state) {
 
 function renderCombat(state) {
   const embed = {
-    color: COLORS.active,
+    color: state.phase === GamePhase.VICTORY_CONFIRM
+      ? COLORS.reward
+      : COLORS.active,
     title: `🎰 地區 ${state.adventure.regionDepth}｜第 ${state.round} 回合`,
     description: combatDescription(state),
     fields: [
@@ -309,6 +311,14 @@ function renderEndSummary(state) {
 }
 
 function combatControls(state) {
+  if (state.phase === GamePhase.VICTORY_CONFIRM) {
+    return [actionRow([button({
+      customId: gameCustomId(state.id, 'victory-confirm'),
+      label: '確認',
+      style: BUTTON_STYLE.SUCCESS,
+    })])];
+  }
+
   const stunned = isStunned(state);
   const actionButtons = [button({
     customId: gameCustomId(state.id, 'wager'),
@@ -363,6 +373,13 @@ function combatControls(state) {
 }
 
 function combatDescription(state) {
+  if (state.phase === GamePhase.VICTORY_CONFIRM) {
+    return [
+      `**你擊敗了 ${state.enemy.name}！**`,
+      '敵人生命已降至 0，按下「確認」查看戰鬥結果與獎勵。',
+    ].join('\n');
+  }
+
   const intent = getEnemyIntent(state);
   const intentText = intent
     ? `${intent.name}，預計造成 ${intent.damage} 點傷害`

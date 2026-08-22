@@ -7,6 +7,7 @@ import {
   chooseEventOption,
   chooseReward,
   completeEvent,
+  confirmCombatVictory,
   createGame,
   endPlayerTurn,
   GamePhase,
@@ -384,15 +385,21 @@ test('三個不幸不會自動換回合，玩家只能手動結束', () => {
   assert.equal(isStunned(state), false);
 });
 
-test('擊敗怪物後進入獨立獎勵選擇，不會結束整場遊戲或反擊', () => {
-  const state = placeBet(game({ enemy: { maxHp: 3, baseDamage: 999 } }), 1, {
+test('擊敗怪物後先等待玩家確認，再進入獨立獎勵選擇', () => {
+  let state = placeBet(game({ enemy: { maxHp: 3, baseDamage: 999 } }), 1, {
     reels: [ATTACK, ATTACK, DEFENSE],
     rewardRng: zero,
   });
 
   assert.equal(state.status, GameStatus.ACTIVE);
-  assert.equal(state.phase, GamePhase.REWARD_CHOICE);
+  assert.equal(state.phase, GamePhase.VICTORY_CONFIRM);
+  assert.equal(state.enemy.hp, 0);
   assert.equal(state.player.hp, 45);
+  assert.equal(state.rewardChoices.length, 0);
+  assert.equal(state.adventure.defeatedUnitCount, 0);
+
+  state = confirmCombatVictory(state, { rewardRng: zero });
+  assert.equal(state.phase, GamePhase.REWARD_CHOICE);
   assert.equal(state.rewardChoices.length, 2);
   assert.equal(state.adventure.defeatedUnitCount, 1);
 });
@@ -402,6 +409,7 @@ test('選擇Boss獎勵後換區，敵人生命與基礎傷害提高20%', () => {
     reels: [ATTACK, ATTACK, DEFENSE],
     rewardRng: zero,
   });
+  state = confirmCombatVictory(state, { rewardRng: zero });
   state = chooseReward(state, 0, {
     worldRng: sequence([0.99, 0.99, 0, 0]),
     monsterRng: zero,
@@ -479,6 +487,8 @@ test('神秘泉水有20%機率進入菁英戰鬥，整個奇遇只計一次進�
     reels: [ATTACK, ATTACK, DEFENSE],
     rewardRng: zero,
   });
+  assert.equal(state.phase, GamePhase.VICTORY_CONFIRM);
+  state = confirmCombatVictory(state, { rewardRng: zero });
   assert.equal(state.adventure.regionProgress, 1);
   assert.equal(state.adventure.completedEncounters, 1);
 });

@@ -38,6 +38,7 @@ export const GameStatus = Object.freeze({
 
 export const GamePhase = Object.freeze({
   PLAYER_TURN: 'player-turn',
+  VICTORY_CONFIRM: 'victory-confirm',
   REWARD_CHOICE: 'reward-choice',
   EVENT: 'event',
   ENDED: 'ended',
@@ -206,7 +207,7 @@ export function placeBet(
   };
   next.lastAction = { type: 'spin', text: spinActionText(next.lastImpact) };
 
-  if (next.enemy.hp === 0) finishCombatVictory(next, { rewardRng });
+  if (next.enemy.hp === 0) awaitCombatVictoryConfirmation(next);
   return next;
 }
 
@@ -260,7 +261,7 @@ export function activateSkill(
     events: result.events,
   });
 
-  if (next.enemy.hp === 0) finishCombatVictory(next, { rewardRng });
+  if (next.enemy.hp === 0) awaitCombatVictoryConfirmation(next);
   return next;
 }
 
@@ -310,7 +311,21 @@ export function useItem(
     events: result.events,
   });
 
-  if (next.enemy.hp === 0) finishCombatVictory(next, { rewardRng });
+  if (next.enemy.hp === 0) awaitCombatVictoryConfirmation(next);
+  return next;
+}
+
+export function confirmCombatVictory(
+  state,
+  { rewardRng = Math.random } = {},
+) {
+  const next = upgradeGameState(state);
+  const canConfirm = next.status === GameStatus.ACTIVE
+    && next.phase === GamePhase.VICTORY_CONFIRM
+    && next.enemy?.hp === 0;
+  if (!canConfirm) throw new Error('目前沒有待確認的戰鬥勝利');
+
+  finishCombatVictory(next, { rewardRng });
   return next;
 }
 
@@ -332,7 +347,7 @@ export function endPlayerTurn(
   const enemyTurnStartStatus = resolveTriggeredStatuses(next.enemy, 'turn-start');
   next.enemy = enemyTurnStartStatus.unit;
   if (next.enemy.hp === 0) {
-    finishCombatVictory(next, { rewardRng });
+    awaitCombatVictoryConfirmation(next);
     return next;
   }
 
@@ -679,8 +694,16 @@ function randomSkillId(player, rng) {
   return skillIds[randomInteger(0, skillIds.length - 1, rng)];
 }
 
-function finishCombatVictory(state, { rewardRng }) {
+function awaitCombatVictoryConfirmation(state) {
   if (state.phase !== GamePhase.PLAYER_TURN) return;
+  state.phase = GamePhase.VICTORY_CONFIRM;
+  state.enemy.intent = null;
+  clearTurnResources(state);
+  state.stunned = false;
+}
+
+function finishCombatVictory(state, { rewardRng }) {
+  if (state.phase !== GamePhase.VICTORY_CONFIRM) return;
   const defeated = state.enemy;
   state.adventure.defeatedUnitCount += 1;
   state.adventure.defeatedByRank[defeated.rank] += 1;
@@ -695,9 +718,6 @@ function finishCombatVictory(state, { rewardRng }) {
     player: state.player,
   });
   state.phase = GamePhase.REWARD_CHOICE;
-  state.enemy.intent = null;
-  clearTurnResources(state);
-  state.stunned = false;
   state.history.push({
     type: 'combat-victory',
     unitId: defeated.unitId,

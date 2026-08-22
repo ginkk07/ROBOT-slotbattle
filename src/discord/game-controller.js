@@ -13,6 +13,7 @@ import {
   chooseReward,
   chooseEventOption,
   completeEvent,
+  confirmCombatVictory,
   continueWithoutReward,
   createGame,
   endPlayerTurn,
@@ -308,6 +309,9 @@ function nextStateForAction(state, { action, value }, rngs) {
       monsterRng: rngs.monsterRng,
       rewardRng: rngs.rewardRng,
     });
+  }
+  if (action === 'victory-confirm') {
+    return confirmCombatVictory(state, { rewardRng: rngs.rewardRng });
   }
   if (action === 'reward') {
     return chooseReward(state, Number(value), {
