@@ -14,21 +14,13 @@ const DETAIL_COLOR = 0x5865f2;
 /**
  * 戰鬥面板的技能／道具詳情卡。
  *
- * 卡片會以 Discord 私人訊息顯示。可使用時才建立「使用」按鈕，
+ * 卡片會暫時取代原本的戰鬥面板。可使用時才建立「使用」按鈕，
  * 否則只保留「關閉」，讓玩家仍能查看目前無法使用的內容。
  */
 export function renderContentDetail(state, contentType, contentId) {
   if (contentType === 'skill') return renderSkillDetail(state, contentId);
   if (contentType === 'item') return renderItemDetail(state, contentId);
   throw new RangeError(`不存在的詳情類型：${contentType}`);
-}
-
-export function renderClosedContentDetail() {
-  return {
-    content: '已關閉技能／道具說明。',
-    embeds: [],
-    components: [],
-  };
 }
 
 function renderSkillDetail(state, skillId) {
