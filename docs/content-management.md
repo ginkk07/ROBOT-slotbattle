@@ -123,8 +123,10 @@
 ```bash
 npm test
 npm run validate-data
-npm run simulate -- 1000
+npm run simulate -- 100
 npm run worker:check
 ```
+
+合併前的快速檢查使用固定種子與每局 100 回合上限；進行平衡評估時，再以 `SLOT_SIM_SEED`、`SLOT_SIM_MAX_TURNS` 與執行局數擴大樣本。
 
 資料驗證會檢查內容引用、怪物技能數、所有機率與權重、地區結構、開局解鎖、成就解鎖及掉落表。新增平衡欄位時，也必須同步加入驗證，避免錯誤設定直到遊戲執行時才被發現。

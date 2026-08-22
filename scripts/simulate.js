@@ -1,5 +1,3 @@
-import { randomInt } from 'node:crypto';
-
 import { getSkill } from '../src/game/data/skills.js';
 import {
   activateSkill,
@@ -15,26 +13,33 @@ import {
   placeBet,
 } from '../src/game/engine.js';
 
-const requestedRuns = Number.parseInt(process.argv[2] ?? '10000', 10);
+const requestedRuns = Number.parseInt(process.argv[2] ?? '100', 10);
 const runs = Number.isInteger(requestedRuns) && requestedRuns > 0
   ? requestedRuns
-  : 10000;
-const spinRng = (maximum) => randomInt(maximum);
-const probabilityRng = () => randomInt(1_000_000) / 1_000_000;
+  : 100;
+const maxTurnsPerRun = optionalPositiveInteger('SLOT_SIM_MAX_TURNS') ?? 100;
+const probabilityRng = createSeededRng(seedFromEnvironment());
+const spinRng = (maximum) => Math.floor(probabilityRng() * maximum);
 const config = simulationConfigFromEnvironment();
 
 for (const strategy of ['all-in', 'split-twice', 'split-evenly']) {
-  const summary = simulate(strategy, runs);
+  const summary = simulate(strategy, runs, maxTurnsPerRun);
   console.log([
     `${strategy}:`,
     `平均擊敗 ${(summary.unitsDefeated / runs).toFixed(2)} 個單位`,
     `平均到達地區 ${(summary.regionDepth / runs).toFixed(2)}`,
     `平均 ${((summary.turns / runs)).toFixed(2)} 回合`,
+    `達到 ${maxTurnsPerRun} 回合上限 ${summary.cappedRuns} 局`,
   ].join(' '));
 }
 
-function simulate(strategy, iterations) {
-  const summary = { unitsDefeated: 0, regionDepth: 0, turns: 0 };
+function simulate(strategy, iterations, turnLimit) {
+  const summary = {
+    unitsDefeated: 0,
+    regionDepth: 0,
+    turns: 0,
+    cappedRuns: 0,
+  };
 
   for (let index = 0; index < iterations; index += 1) {
     let turns = 0;
@@ -46,7 +51,7 @@ function simulate(strategy, iterations) {
       monsterRng: probabilityRng,
     });
 
-    while (state.status === GameStatus.ACTIVE && turns < 500) {
+    while (state.status === GameStatus.ACTIVE && turns < turnLimit) {
       if (state.phase === GamePhase.REWARD_CHOICE) {
         state = state.rewardChoices.length
           ? chooseReward(state, 0, {
@@ -97,6 +102,9 @@ function simulate(strategy, iterations) {
       ?? state.adventure?.regionDepth
       ?? 1;
     summary.turns += turns;
+    if (state.status === GameStatus.ACTIVE && turns >= turnLimit) {
+      summary.cappedRuns += 1;
+    }
   }
 
   return summary;
@@ -136,4 +144,20 @@ function simulationConfigFromEnvironment() {
 function optionalPositiveInteger(name) {
   const value = Number.parseInt(process.env[name] ?? '', 10);
   return Number.isInteger(value) && value > 0 ? value : undefined;
+}
+
+function seedFromEnvironment() {
+  const value = Number.parseInt(process.env.SLOT_SIM_SEED ?? '', 10);
+  return Number.isInteger(value) ? value >>> 0 : 0x5EED_BA77;
+}
+
+function createSeededRng(seed) {
+  let value = seed;
+  return () => {
+    value = (value + 0x6D2B79F5) >>> 0;
+    let result = value;
+    result = Math.imul(result ^ (result >>> 15), result | 1);
+    result ^= result + Math.imul(result ^ (result >>> 7), result | 61);
+    return ((result ^ (result >>> 14)) >>> 0) / 4_294_967_296;
+  };
 }

@@ -151,6 +151,8 @@ npm run simulate -- 1000
 npm run worker:check
 ```
 
+模擬器使用固定種子，讓相同版本的結果可以重現；預設每局最多 100 回合。深入平衡測試可自行指定，例如 `SLOT_SIM_SEED=123 SLOT_SIM_MAX_TURNS=500 npm run simulate -- 1000`。CI 只執行 100 局快速模擬，避免極少數高治療長局占滿檢查時間。
+
 測試涵蓋拉霸全部 125 種排列、自由投入 Modal、技能／道具私人詳情卡、四種玩家技能的三個等級、即時戰鬥、怪物行動、奇遇與 Boss 判定順序、獨立稀有度、區域成長、玩家／怪物技能分離、遊戲結算、成就冪等性、舊存檔升級與 D1 版本衝突。GitHub Actions 會在 Push 與 Pull Request 時自動執行測試、資料驗證、模擬及 Worker 打包。
 
 ## 尚待設計的內容

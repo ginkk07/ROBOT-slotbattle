@@ -22,6 +22,7 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run validate-data
-      - run: npm run simulate -- 1000
+      # CI uses a short deterministic smoke simulation; run 1,000+ locally for balance work.
+      - run: npm run simulate -- 100
       - run: npm run worker:check
       - run: docker build --tag slotbattle-bot:ci .
