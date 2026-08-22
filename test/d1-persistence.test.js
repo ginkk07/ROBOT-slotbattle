@@ -56,19 +56,37 @@ test('D1會建立永久玩家資料並防止舊版本覆寫', async (context) =>
 
   assert.equal(created.created, true);
   assert.equal(created.revision, 1);
-  assert.deepEqual(created.profile.unlockedStartingSkillIds, ['life-recovery']);
+  assert.deepEqual(created.profile.unlockedStartingSkillIds, [
+    'life-recovery',
+    'power-strike',
+    'fire-imbue',
+  ]);
 
   const loaded = await store.getOrCreateProfile('player-1');
   assert.equal(loaded.created, false);
 
-  loaded.profile.startingItemSlots = 3;
+  loaded.profile.lastStartingLoadout.skillIds = ['power-strike'];
   const saved = await store.saveProfile(loaded.profile, { expectedRevision: 1 });
   assert.equal(saved.revision, 2);
-  assert.equal(saved.profile.startingItemSlots, 3);
+  assert.deepEqual(saved.profile.lastStartingLoadout.skillIds, ['power-strike']);
 
   await assert.rejects(
     store.saveProfile(saved.profile, { expectedRevision: 1 }),
     StoreConflictError,
+  );
+});
+
+test('D1遷移會建立戰鬥與玩家兩張資料表', async (context) => {
+  const { database } = await createStore(context);
+  const tables = await database.prepare(`
+    SELECT name FROM sqlite_master
+    WHERE type = 'table' AND name LIKE 'slotbattle_%'
+    ORDER BY name
+  `).all();
+
+  assert.deepEqual(
+    tables.results.map((row) => row.name),
+    ['slotbattle_profiles', 'slotbattle_sessions'],
   );
 });
 

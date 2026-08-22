@@ -106,7 +106,7 @@ test('規則指令會立即回傳非同步之外的Discord訊息', async () => {
 
   assert.equal(body.type, 4);
   assert.equal(body.data.flags, 64);
-  assert.equal(body.data.embeds[0].title, '🎰 拉霸戰鬥規則');
+  assert.equal(body.data.embeds[0].title, '🎰 拉霸戰鬥｜怎麼玩');
 });
 
 test('開始指令會直接回傳遊戲面板，不再呼叫Discord Webhook', async () => {
@@ -121,7 +121,7 @@ test('開始指令會直接回傳遊戲面板，不再呼叫Discord Webhook', as
   const body = await response.json();
 
   assert.equal(body.type, 4);
-  assert.equal(body.data.embeds[0].title, '🎰 拉霸戰鬥｜第 1 回合');
+  assert.equal(body.data.embeds[0].title, '🎰 地區 1｜第 1 回合');
   assert.equal(body.data.components[0].components[0].type, 2);
 });
 
@@ -140,7 +140,8 @@ test('玩家資料指令會直接回傳私人訊息', async () => {
 
   assert.equal(body.type, 4);
   assert.equal(body.data.flags, 64);
-  assert.equal(body.data.embeds[0].title, '🧭 Roguelike 玩家資料');
+  assert.equal(body.data.embeds[0].title, '🧭 開局配置');
+  assert.equal(body.data.components[0].components[0].type, 3);
 });
 
 test('Google背景同步不會延後Discord戰鬥面板', async () => {
@@ -177,7 +178,7 @@ test('Google背景同步不會延後Discord戰鬥面板', async () => {
   await Promise.all(background);
 });
 
-test('按鈕互動會直接更新原本的戰鬥訊息', async () => {
+test('投入按鈕會開啟Modal，送出數字後直接更新戰鬥訊息', async () => {
   const store = new MemoryGameStore();
   const worker = createWorker({
     verifyRequest: async () => true,
@@ -192,12 +193,52 @@ test('按鈕互動會直接更新原本的戰鬥訊息', async () => {
   const startBody = await startResponse.json();
   const customId = startBody.data.components[0].components[0].custom_id;
 
-  const response = await worker.fetch(interactionRequest(componentInteraction(customId)),
+  const modalResponse = await worker.fetch(
+    interactionRequest(componentInteraction(customId)),
     ENVIRONMENT, {});
+  const modalBody = await modalResponse.json();
+  assert.equal(modalBody.type, 9);
+  assert.equal(
+    modalBody.data.custom_id,
+    `slotbattle:${customId.split(':')[1]}:wager-submit`,
+  );
+
+  const response = await worker.fetch(
+    interactionRequest(modalInteraction(modalBody.data.custom_id, '2')),
+    ENVIRONMENT,
+    {},
+  );
   const body = await response.json();
+  assert.equal(body.type, 7);
+  assert.equal(body.data.embeds[0].title, '🎰 地區 1｜第 1 回合');
+});
+
+test('開局配置選單會保存選擇並更新私人訊息', async () => {
+  const store = new MemoryGameStore();
+  const worker = createWorker({
+    verifyRequest: async () => true,
+    storeFactory: () => store,
+  });
+  await worker.fetch(
+    interactionRequest(commandInteraction('profile')),
+    ENVIRONMENT,
+    {},
+  );
+
+  const response = await worker.fetch(
+    interactionRequest(componentInteraction(
+      'slotbattle-profile:skill',
+      { componentType: 3, values: ['fire-imbue'] },
+    )),
+    ENVIRONMENT,
+    {},
+  );
+  const body = await response.json();
+  const profile = await store.getOrCreateProfile('player-1');
 
   assert.equal(body.type, 7);
-  assert.equal(body.data.embeds[0].title, '🎰 拉霸戰鬥｜第 1 回合');
+  assert.match(body.data.embeds[0].fields[0].value, /火焰附加/);
+  assert.deepEqual(profile.profile.lastStartingLoadout.skillIds, ['fire-imbue']);
 });
 
 function interactionRequest(payload) {
@@ -226,7 +267,7 @@ function commandInteraction(subcommand) {
   };
 }
 
-function componentInteraction(customId) {
+function componentInteraction(customId, { componentType = 2, values } = {}) {
   return {
     id: 'interaction-2',
     application_id: '526581724554067969',
@@ -234,8 +275,30 @@ function componentInteraction(customId) {
     type: 3,
     member: { user: { id: 'player-1' } },
     data: {
-      component_type: 2,
+      component_type: componentType,
       custom_id: customId,
+      ...(values ? { values } : {}),
+    },
+  };
+}
+
+function modalInteraction(customId, wager) {
+  return {
+    id: 'interaction-3',
+    application_id: '526581724554067969',
+    token: 'interaction-token-3',
+    type: 5,
+    member: { user: { id: 'player-1' } },
+    data: {
+      custom_id: customId,
+      components: [{
+        type: 1,
+        components: [{
+          type: 4,
+          custom_id: 'wager',
+          value: wager,
+        }],
+      }],
     },
   };
 }

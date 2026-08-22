@@ -27,8 +27,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return;
     }
 
-    if (interaction.isButton()) {
-      await handleButton(interaction);
+    if (interaction.isButton() || interaction.isStringSelectMenu()) {
+      await handleComponent(interaction);
+      return;
+    }
+
+    if (interaction.isModalSubmit()) {
+      await handleModal(interaction);
     }
   } catch (error) {
     console.error(error);
@@ -67,11 +72,36 @@ async function handleCommand(interaction) {
   await interaction.editReply(result.payload);
 }
 
-async function handleButton(interaction) {
-  await interaction.deferUpdate();
-  const result = await controller.handleButton({
+async function handleComponent(interaction) {
+  const result = await controller.handleComponent({
     customId: interaction.customId,
     userId: interaction.user.id,
+    values: interaction.values ?? [],
+  });
+  if (!result.handled) return;
+
+  if (result.modal) {
+    await interaction.showModal(result.modal);
+    return;
+  }
+
+  if (result.payload) await interaction.update(result.payload);
+  else await interaction.deferUpdate();
+  for (const followUp of result.followUps) {
+    await interaction.followUp(followUp);
+  }
+}
+
+async function handleModal(interaction) {
+  await interaction.deferUpdate();
+  const fields = Object.fromEntries(
+    [...interaction.fields.fields.values()]
+      .map((field) => [field.customId, field.value]),
+  );
+  const result = await controller.handleModal({
+    customId: interaction.customId,
+    userId: interaction.user.id,
+    fields,
   });
   if (!result.handled) return;
 
@@ -85,7 +115,8 @@ async function safelyReportError(interaction, error) {
   const content = `操作失敗：${error instanceof Error ? error.message : '未知錯誤'}`;
 
   try {
-    if (interaction.isButton() && (interaction.deferred || interaction.replied)) {
+    if ((interaction.isMessageComponent() || interaction.isModalSubmit())
+      && (interaction.deferred || interaction.replied)) {
       await interaction.followUp({ content, flags: MessageFlags.Ephemeral });
     } else if (interaction.deferred) {
       await interaction.editReply({ content, embeds: [], components: [] });

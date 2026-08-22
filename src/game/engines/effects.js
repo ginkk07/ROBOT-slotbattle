@@ -30,7 +30,7 @@ export function applyEffects({
       const resistance = clampResistance(
         recipient.damageResistances?.[effect.element] ?? 0,
       );
-      const afterResistance = Math.max(0, Math.floor(requested * (1 - resistance)));
+      const afterResistance = resistedDamage(requested, resistance);
       const actual = Math.min(recipient.hp, afterResistance);
       recipient.hp -= actual;
       events.push({
@@ -51,6 +51,7 @@ export function applyEffects({
         targetUnit: recipient,
         chance: effect.chance,
         duration: effect.duration,
+        stacks: effect.stacks,
         potency: effect.potency,
         rng,
       });
@@ -68,6 +69,7 @@ export function applyEffects({
         target: effect.target,
         applied: result.applied,
         reason: result.reason,
+        stacks: result.applied ? result.activeStatus.stacks : 0,
       });
       continue;
     }
@@ -102,4 +104,9 @@ function effectAmount(effect, points) {
 function clampResistance(value) {
   if (!Number.isFinite(value)) throw new RangeError('傷害抗性必須是數字');
   return Math.min(1, Math.max(0, value));
+}
+
+function resistedDamage(requested, resistance) {
+  if (requested <= 0 || resistance >= 1) return 0;
+  return Math.max(1, Math.floor(requested * (1 - resistance)));
 }

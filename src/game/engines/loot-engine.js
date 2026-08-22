@@ -1,15 +1,81 @@
+import { ITEMS } from '../data/items.js';
 import { getLootTable } from '../data/loot-tables.js';
-import { pickWeighted, randomInteger } from './weighted-random.js';
+import { ContentRarity } from '../data/rarities.js';
+import { SKILLS } from '../data/skills.js';
+import { pickWeighted } from './weighted-random.js';
 
-export function rollLoot(lootTableId, { rng = Math.random } = {}) {
+export function rollRewardChoices(
+  lootTableId,
+  {
+    rng = Math.random,
+    regionTags = [],
+    rarityModifiers = {},
+  } = {},
+) {
   const table = getLootTable(lootTableId);
-  const totals = new Map();
+  const choices = [];
 
-  for (let roll = 0; roll < table.rolls; roll += 1) {
-    const entry = pickWeighted(table.entries, rng);
-    const quantity = randomInteger(entry.quantity[0], entry.quantity[1], rng);
-    totals.set(entry.itemId, (totals.get(entry.itemId) ?? 0) + quantity);
+  for (let roll = 0; roll < table.choices; roll += 1) {
+    const rarity = rollContentRarity(table.rarityWeights, rarityModifiers, rng);
+    const fullPool = rewardPool(rarity, regionTags);
+    const unusedPool = fullPool.filter((entry) => (
+      !choices.some((choice) => (
+        choice.contentType === entry.contentType && choice.contentId === entry.contentId
+      ))
+    ));
+    const selected = pickWeighted(
+      unusedPool.length > 0 ? unusedPool : fullPool,
+      rng,
+      (entry) => entry.lootWeight,
+    );
+    choices.push({ ...selected, rarity });
   }
 
-  return [...totals].map(([itemId, quantity]) => ({ itemId, quantity }));
+  return choices;
+}
+
+// 保留名稱，讓既有資料工具不會直接中斷；新版回傳三選一候選內容。
+export const rollLoot = rollRewardChoices;
+
+function rollContentRarity(baseWeights, modifiers, rng) {
+  const multipliers = {
+    [ContentRarity.COMMON]: 1,
+    [ContentRarity.RARE]: Number(modifiers.rareMultiplier ?? 1),
+    [ContentRarity.LEGENDARY]: Number(modifiers.legendaryMultiplier ?? 1),
+  };
+  const entries = Object.values(ContentRarity)
+    .map((rarity) => ({
+      rarity,
+      weight: Number(baseWeights[rarity] ?? 0) * multipliers[rarity],
+    }))
+    .filter((entry) => entry.weight > 0);
+  return pickWeighted(entries, rng).rarity;
+}
+
+function rewardPool(rarity, regionTags) {
+  const skills = Object.values(SKILLS)
+    .filter((skill) => eligible(skill, rarity, regionTags))
+    .map((skill) => ({
+      contentType: 'skill',
+      contentId: skill.id,
+      lootWeight: skill.lootWeight,
+    }));
+  const items = Object.values(ITEMS)
+    .filter((item) => eligible(item, rarity, regionTags))
+    .map((item) => ({
+      contentType: 'item',
+      contentId: item.id,
+      lootWeight: item.lootWeight,
+    }));
+  const pool = [...skills, ...items];
+  if (pool.length === 0) {
+    throw new RangeError(`${rarity} 稀有度沒有可抽取的技能或道具`);
+  }
+  return pool;
+}
+
+function eligible(content, rarity, regionTags) {
+  return content.lootEligible
+    && content.rarity === rarity
+    && regionTags.every((tag) => content.lootTags?.includes(tag));
 }

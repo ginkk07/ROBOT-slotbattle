@@ -126,11 +126,14 @@ DISCORD_GUILD_ID
 
 1. `/slotbattle rules` 是否立即顯示規則。
 2. `/slotbattle start` 是否建立戰鬥面板。
-3. 點擊「投入1點」是否更新拉霸結果。
-4. `/slotbattle resume` 是否能重新顯示進行中的戰鬥。
-5. `/slotbattle profile` 是否能立即顯示玩家資料。
-6. 查看 D1 的 `slotbattle_profiles` 與 `slotbattle_sessions` 是否新增資料。
-7. 稍候查看 Google 試算表的 `slotbattle_profiles` 是否新增 Discord 玩家 ID。
+3. `/slotbattle profile` 是否顯示技能與道具選單，並可各選 1 個。
+4. 點擊「投入點數」是否開啟輸入表單；輸入 `1` 後是否立即更新拉霸結果。
+5. 累積足夠法力後，攜帶技能按鈕是否可以使用。
+6. 攜帶消耗品時是否顯示使用按鈕；攜帶裝備時是否顯示「已裝備」。
+7. 按下「回合結束」後，Boss 是否攻擊並進入下一回合。
+8. `/slotbattle resume` 是否能重新顯示進行中的戰鬥。
+9. 查看 D1 的 `slotbattle_profiles` 與 `slotbattle_sessions` 是否新增資料。
+10. 稍候查看 Google 試算表的 `slotbattle_profiles` 是否新增 Discord 玩家 ID 與開局配置。
 
 ## 更新方式
 

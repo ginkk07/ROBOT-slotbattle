@@ -3,29 +3,18 @@ import { createCatalog, requireDefinition } from './catalog.js';
 export const LOOT_TABLES = createCatalog([
   {
     id: 'ruins-common-loot',
-    rolls: 1,
-    entries: [
-      { itemId: 'healing-potion', weight: 80, quantity: [1, 1] },
-      { itemId: 'fire-bomb', weight: 20, quantity: [1, 1] },
-    ],
+    choices: 3,
+    rarityWeights: { common: 70, rare: 25, legendary: 5 },
   },
   {
     id: 'ruins-elite-loot',
-    rolls: 1,
-    entries: [
-      { itemId: 'healing-potion', weight: 55, quantity: [1, 2] },
-      { itemId: 'fire-bomb', weight: 40, quantity: [1, 2] },
-      { itemId: 'flame-sword', weight: 5, quantity: [1, 1] },
-    ],
+    choices: 3,
+    rarityWeights: { common: 30, rare: 60, legendary: 10 },
   },
   {
     id: 'ruins-boss-loot',
-    rolls: 2,
-    entries: [
-      { itemId: 'healing-potion', weight: 40, quantity: [1, 2] },
-      { itemId: 'fire-bomb', weight: 40, quantity: [1, 2] },
-      { itemId: 'flame-sword', weight: 20, quantity: [1, 1] },
-    ],
+    choices: 3,
+    rarityWeights: { common: 0, rare: 0, legendary: 100 },
   },
 ], '掉落表');
 

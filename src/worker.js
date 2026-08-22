@@ -98,6 +98,16 @@ export function createWorker({
         });
       }
 
+      if (interaction.type === InteractionType.MODAL_SUBMIT) {
+        return handleModalSubmit({
+          interaction,
+          env,
+          context,
+          storeFactory,
+          controllerFactory,
+        });
+      }
+
       return messageResponse({
         content: '目前不支援這種 Discord 互動。',
         flags: InteractionResponseFlags.EPHEMERAL,
@@ -153,10 +163,15 @@ async function handleMessageComponent({
     const controller = controllerFactory({
       store: storeForRequest({ env, context, storeFactory }),
     });
-    const result = await controller.handleButton({
+    const result = await controller.handleComponent({
       customId: interaction.data?.custom_id,
       userId: userIdFor(interaction),
+      values: interaction.data?.values ?? [],
     });
+
+    if (result.modal) {
+      return interactionResponse(InteractionResponseType.MODAL, result.modal);
+    }
 
     if (result.payload) {
       return interactionResponse(
@@ -169,6 +184,37 @@ async function handleMessageComponent({
     return interactionResponse(InteractionResponseType.DEFERRED_UPDATE_MESSAGE);
   } catch (error) {
     console.error('處理 Discord 按鈕失敗：', error);
+    return messageResponse(errorPayload(error, { ephemeral: true }));
+  }
+}
+
+async function handleModalSubmit({
+  interaction,
+  env,
+  context,
+  storeFactory,
+  controllerFactory,
+}) {
+  try {
+    const controller = controllerFactory({
+      store: storeForRequest({ env, context, storeFactory }),
+    });
+    const result = await controller.handleModal({
+      customId: interaction.data?.custom_id,
+      userId: userIdFor(interaction),
+      fields: modalFields(interaction.data?.components),
+    });
+
+    if (result.payload) {
+      return interactionResponse(
+        InteractionResponseType.UPDATE_MESSAGE,
+        result.payload,
+      );
+    }
+    if (result.followUps.length) return messageResponse(result.followUps[0]);
+    return interactionResponse(InteractionResponseType.DEFERRED_UPDATE_MESSAGE);
+  } catch (error) {
+    console.error('處理 Discord 輸入表單失敗：', error);
     return messageResponse(errorPayload(error, { ephemeral: true }));
   }
 }
@@ -190,6 +236,16 @@ function errorPayload(error, { ephemeral = false } = {}) {
 
 function userIdFor(interaction) {
   return interaction.member?.user?.id ?? interaction.user?.id;
+}
+
+function modalFields(rows = []) {
+  return Object.fromEntries(rows.flatMap((row) => (
+    (row.components ?? []).flatMap((component) => (
+      component.custom_id && component.value !== undefined
+        ? [[component.custom_id, component.value]]
+        : []
+    ))
+  )));
 }
 
 function missingRuntimeVariables(environment) {

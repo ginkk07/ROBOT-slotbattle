@@ -22,7 +22,7 @@ export const commands = [
       {
         type: SUBCOMMAND_TYPE,
         name: 'profile',
-        description: '查看永久解鎖與開局攜帶欄位',
+        description: '選擇下一場的開局技能與道具',
       },
       {
         type: SUBCOMMAND_TYPE,
