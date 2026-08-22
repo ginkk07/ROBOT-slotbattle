@@ -8,7 +8,15 @@ import {
   renderRules,
   renderWagerModal,
 } from '../src/discord/render.js';
-import { abandonGame, createGame, placeBet } from '../src/game/engine.js';
+import { renderContentDetail } from '../src/discord/content-detail.js';
+import {
+  abandonGame,
+  createGame,
+  GamePhase,
+  placeBet,
+  useItem,
+} from '../src/game/engine.js';
+import { getEvent } from '../src/game/data/events.js';
 import { SymbolId } from '../src/game/symbols.js';
 import { createDefaultProfile } from '../src/player/profile.js';
 
@@ -54,11 +62,19 @@ test('戰鬥面板使用自由投入、技能、道具與回合結束按鈕', ()
 
   assert.deepEqual(labels, [
     '投入點數（剩餘 4）',
-    '強擊（2法力）',
-    '使用火焰炸彈 ×1',
+    '強擊 Lv.1',
+    '火焰炸彈 ×1',
     '回合結束',
     '放棄遊戲',
   ]);
+  assert.equal(
+    payload.components[0].components[1].custom_id,
+    'slotbattle:render-test:detail-skill:power-strike',
+  );
+  assert.equal(
+    payload.components[0].components[2].custom_id,
+    'slotbattle:render-test:detail-item:fire-bomb',
+  );
   assert.doesNotMatch(labels.join('、'), /投入1點|投入2點|投入3點|全部投入/);
 });
 
@@ -79,13 +95,72 @@ test('裝備在面板顯示為已穿戴而不是使用按鈕', () => {
 
   assert.match(loadout.value, /燃焰之劍（已裝備）/);
   assert.match(
-    payload.embeds[0].fields.find((field) => field.name === '狀態').value,
+    payload.embeds[0].fields.find((field) => field.name === '玩家狀態').value,
     /攻擊力＋1（3回合）/,
   );
+  assert.ok(labels.includes('燃焰之劍'));
   assert.doesNotMatch(labels.join('、'), /使用燃焰之劍/);
 });
 
-test('戰鬥勝利後顯示三個各自帶稀有度的獎勵按鈕', () => {
+test('回合資源只使用符號與數值顯示', () => {
+  const payload = renderGame(createGame({
+    id: 'resource-render-test',
+    ownerId: 'player-1',
+  }));
+  const resources = payload.embeds[0].fields
+    .find((field) => field.name === '本回合資源').value;
+
+  assert.equal(resources, '❇️ **4**　🛡️ **0**　✨ **0**');
+  assert.doesNotMatch(resources, /行動|護甲|法力/);
+});
+
+test('技能詳情依目前可用性顯示使用與關閉按鈕', () => {
+  const state = createGame({
+    id: 'skill-detail-test',
+    ownerId: 'player-1',
+    loadout: { skillIds: ['power-strike'], itemIds: [] },
+  });
+
+  const unavailable = renderContentDetail(state, 'skill', 'power-strike');
+  assert.match(unavailable.embeds[0].fields[2].value, /2倍/);
+  assert.deepEqual(
+    unavailable.components[0].components.map((component) => component.label),
+    ['關閉'],
+  );
+
+  state.resources.mana = 2;
+  const usable = renderContentDetail(state, 'skill', 'power-strike');
+  assert.deepEqual(
+    usable.components[0].components.map((component) => component.label),
+    ['使用', '關閉'],
+  );
+});
+
+test('裝備詳情只顯示關閉，消耗品可用時顯示使用', () => {
+  const equipmentState = createGame({
+    id: 'equipment-detail-test',
+    ownerId: 'player-1',
+    loadout: { skillIds: ['power-strike'], itemIds: ['flame-sword'] },
+  });
+  const equipment = renderContentDetail(equipmentState, 'item', 'flame-sword');
+  assert.deepEqual(
+    equipment.components[0].components.map((component) => component.label),
+    ['關閉'],
+  );
+
+  const itemState = createGame({
+    id: 'item-detail-test',
+    ownerId: 'player-1',
+    loadout: { skillIds: ['power-strike'], itemIds: ['fire-bomb'] },
+  });
+  const consumable = renderContentDetail(itemState, 'item', 'fire-bomb');
+  assert.deepEqual(
+    consumable.components[0].components.map((component) => component.label),
+    ['使用', '關閉'],
+  );
+});
+
+test('戰鬥勝利後只顯示未持有或可升級的獨立獎勵', () => {
   let state = createGame({
     id: 'reward-render-test',
     ownerId: 'player-1',
@@ -105,6 +180,50 @@ test('戰鬥勝利後顯示三個各自帶稀有度的獎勵按鈕', () => {
   assert.equal(payload.embeds[0].fields.length, 3);
   assert.equal(payload.components[0].components.length, 3);
   assert.match(payload.embeds[0].fields[0].name, /【普通】/);
+});
+
+test('戰鬥面板會分開顯示玩家與敵人的狀態', () => {
+  let state = createGame({
+    id: 'enemy-status-render',
+    ownerId: 'player-1',
+    config: { initialEnemyUnitId: 'ruins-guardian' },
+    loadout: { skillIds: ['power-strike'], itemIds: ['fire-bomb'] },
+    monsterRng: () => 0,
+  });
+  state = useItem(state, 'fire-bomb', { rng: () => 0 });
+  const fields = Object.fromEntries(renderGame(state).embeds[0].fields.map((field) => (
+    [field.name, field.value]
+  )));
+
+  assert.match(fields['敵人狀態｜遺跡守衛'], /燃燒 ×3/);
+  assert.equal(fields['玩家狀態'], '無');
+});
+
+test('奇遇只顯示內文與選項，不會公開事件名稱', () => {
+  const event = getEvent('ruins-mysterious-spring');
+  const state = createGame({
+    id: 'event-render',
+    ownerId: 'player-1',
+    config: { initialEnemyUnitId: 'ruins-sentinel' },
+    monsterRng: () => 0,
+  });
+  state.phase = GamePhase.EVENT;
+  state.enemy = null;
+  state.event = {
+    eventId: event.id,
+    name: event.name,
+    description: event.description,
+    rarity: event.rarity,
+    stage: 'choice',
+    options: event.options.map(({ id, label }) => ({ id, label })),
+    result: null,
+  };
+  const payload = renderGame(state);
+  const labels = payload.components[0].components.map((component) => component.label);
+
+  assert.doesNotMatch(payload.embeds[0].title, /神秘泉水/);
+  assert.match(payload.embeds[0].description, /是否要取水喝/);
+  assert.deepEqual(labels, ['是', '否']);
 });
 
 test('遊戲結束畫面顯示擊敗數量與最後技能道具配置', () => {

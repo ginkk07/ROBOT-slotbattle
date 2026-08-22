@@ -13,6 +13,20 @@ export const BossRuleMode = Object.freeze({
 
 export const STATUSES = createCatalog([
   {
+    id: 'power-strike-ready',
+    name: '強擊',
+    emoji: '💥',
+    description: '下一次拉霸造成攻擊傷害時，依技能等級提高傷害倍率。',
+    polarity: StatusPolarity.BUFF,
+    category: 'attack-trigger',
+    trigger: 'next-spin-attack',
+    durationMode: 'until-consumed',
+    defaultDuration: null,
+    stacking: { mode: 'until-consumed', maxStacks: 1 },
+    effect: { type: 'multiply-spin-damage', amountPerPotency: 1 },
+    bossRule: { mode: BossRuleMode.NORMAL },
+  },
+  {
     id: 'fire-imbue',
     name: '火焰附加',
     emoji: '🔥',

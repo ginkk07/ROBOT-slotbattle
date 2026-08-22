@@ -70,6 +70,7 @@ export function applyEffects({
         applied: result.applied,
         reason: result.reason,
         stacks: result.applied ? result.activeStatus.stacks : 0,
+        potency: result.applied ? result.activeStatus.potency : 0,
       });
       continue;
     }

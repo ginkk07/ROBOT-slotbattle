@@ -6,7 +6,8 @@ export function drawEvent(
   { events = [], regionTags = [], rng = Math.random } = {},
 ) {
   const candidates = events.filter((event) => (
-    event.rarity === rarity
+    event.available !== false
+    && event.rarity === rarity
     && regionTags.every((tag) => event.tags.includes(tag))
   ));
   if (candidates.length === 0) {
@@ -15,13 +16,10 @@ export function drawEvent(
   return pickWeighted(candidates, rng, (event) => event.weight ?? 1);
 }
 
-export function resolveEvent(eventId, { rng = Math.random } = {}) {
+export function resolveEvent(eventId, optionId, { rng = Math.random } = {}) {
   const event = getEvent(eventId);
-  const outcome = pickWeighted(event.outcomes, rng);
-
-  if (outcome.type === 'continue') {
-    return { event, outcome };
-  }
-
-  throw new RangeError(`尚未支援的事件結果：${outcome.type}`);
+  const option = event.options.find((entry) => entry.id === optionId);
+  if (!option) throw new RangeError('奇遇選項不存在');
+  const outcome = pickWeighted(option.outcomes, rng);
+  return { event, option, outcome };
 }

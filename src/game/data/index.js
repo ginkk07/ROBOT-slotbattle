@@ -17,7 +17,12 @@ export {
   rarityLabel,
 } from './rarities.js';
 export { REGIONS, getRegion } from './regions.js';
-export { SKILLS, getSkill } from './skills.js';
+export {
+  SKILLS,
+  getSkill,
+  getSkillLevelDefinition,
+  getSkillMaxLevel,
+} from './skills.js';
 export {
   BossRuleMode,
   STATUSES,

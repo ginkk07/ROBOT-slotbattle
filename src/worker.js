@@ -174,6 +174,12 @@ async function handleMessageComponent({
     }
 
     if (result.payload) {
+      if (result.ephemeral) {
+        return messageResponse({
+          ...result.payload,
+          flags: InteractionResponseFlags.EPHEMERAL,
+        });
+      }
       return interactionResponse(
         InteractionResponseType.UPDATE_MESSAGE,
         result.payload,

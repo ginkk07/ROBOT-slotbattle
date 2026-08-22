@@ -15,4 +15,6 @@ export const PLAYER_PROGRESSION_RULES = deepFreeze({
   ],
   startingSkillSlots: 1,
   startingItemSlots: 1,
+  maxHeldSkills: 3,
+  maxSkillLevel: 3,
 });

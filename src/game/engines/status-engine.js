@@ -32,15 +32,17 @@ export function resolveStatusApplication({
     return { applied: false, reason: 'resisted', statusId, chance: finalChance };
   }
 
+  const untilConsumed = definition.durationMode === 'until-consumed';
   const baseDuration = duration ?? definition.defaultDuration;
-  const finalDuration = Math.max(
-    1,
-    Math.ceil(baseDuration * (rule.durationMultiplier ?? 1)),
-  );
+  const finalDuration = untilConsumed
+    ? null
+    : Math.max(1, Math.ceil(baseDuration * (rule.durationMultiplier ?? 1)));
   const finalPotency = potency * (rule.potencyMultiplier ?? 1);
-  const remainingTurns = definition.stacking.mode === 'stack-countdown'
-    ? stacks
-    : finalDuration;
+  const remainingTurns = untilConsumed
+    ? null
+    : definition.stacking.mode === 'stack-countdown'
+      ? stacks
+      : finalDuration;
 
   return {
     applied: true,
@@ -64,7 +66,11 @@ export function mergeActiveStatus(activeStatuses, incoming) {
   if (index === -1) return [...next, structuredClone(incoming)];
 
   const current = next[index];
-  if (definition.stacking.mode === 'stack-countdown') {
+  if (definition.stacking.mode === 'until-consumed') {
+    current.stacks = 1;
+    current.potency = incoming.potency;
+    current.remainingTurns = null;
+  } else if (definition.stacking.mode === 'stack-countdown') {
     current.stacks = Math.min(
       definition.stacking.maxStacks,
       current.stacks + incoming.stacks,

@@ -7,10 +7,16 @@ import {
   WAGER_INPUT_ID,
 } from './render.js';
 import {
+  renderClosedContentDetail,
+  renderContentDetail,
+} from './content-detail.js';
+import {
   abandonGame,
   activateSkill,
   chooseReward,
+  chooseEventOption,
   completeEvent,
+  continueWithoutReward,
   createGame,
   endPlayerTurn,
   isStunned,
@@ -31,6 +37,7 @@ export function createGameController({
   worldRng = Math.random,
   monsterRng = Math.random,
   rewardRng = Math.random,
+  eventRng = worldRng,
 } = {}) {
   if (!store) throw new TypeError('建立遊戲控制器需要 store');
 
@@ -115,6 +122,18 @@ export function createGameController({
       return withGameLock({ busyGames, gameId }, async () => {
         const session = await ownedCurrentSession(store, gameId, userId);
 
+        if (action === 'detail-skill' || action === 'detail-item') {
+          const contentType = action === 'detail-skill' ? 'skill' : 'item';
+          return handledResult(
+            renderContentDetail(session.state, contentType, value),
+            { ephemeral: true },
+          );
+        }
+
+        if (action === 'detail-close') {
+          return handledResult(renderClosedContentDetail());
+        }
+
         if (action === 'wager') {
           if (isStunned(session.state)) {
             throw new Error('暈眩中只能按「回合結束」');
@@ -141,6 +160,7 @@ export function createGameController({
             worldRng,
             monsterRng,
             rewardRng,
+            eventRng,
           });
         }
         return saveAndRender(store, session, next, userId);
@@ -298,6 +318,18 @@ function nextStateForAction(state, { action, value }, rngs) {
   if (action === 'reward') {
     return chooseReward(state, Number(value), {
       worldRng: rngs.worldRng,
+      monsterRng: rngs.monsterRng,
+    });
+  }
+  if (action === 'reward-continue') {
+    return continueWithoutReward(state, {
+      worldRng: rngs.worldRng,
+      monsterRng: rngs.monsterRng,
+    });
+  }
+  if (action === 'event-option') {
+    return chooseEventOption(state, value, {
+      eventRng: rngs.eventRng,
       monsterRng: rngs.monsterRng,
     });
   }

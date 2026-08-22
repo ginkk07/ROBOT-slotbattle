@@ -1,7 +1,7 @@
 import { ACHIEVEMENTS } from '../game/data/achievements.js';
 import { getItem } from '../game/data/items.js';
 import { rarityLabel } from '../game/data/rarities.js';
-import { getSkill } from '../game/data/skills.js';
+import { getSkill, getSkillLevelDefinition } from '../game/data/skills.js';
 import { getStatus } from '../game/data/statuses.js';
 import {
   GamePhase,
@@ -173,17 +173,41 @@ function renderCombat(state) {
   }
   const lastResolution = lastResolutionText(state);
   if (lastResolution) embed.fields.push({ name: '📜 上回合結果', value: lastResolution });
-  const statusText = activeStatusText(state);
-  if (statusText) embed.fields.push({ name: '狀態', value: statusText });
+  embed.fields.push({
+    name: '玩家狀態',
+    value: statusListText(state.player.activeStatuses),
+  });
+  embed.fields.push({
+    name: `敵人狀態｜${state.enemy.name}`,
+    value: statusListText(state.enemy.activeStatuses),
+  });
 
   return { embeds: [embed], components: combatControls(state) };
 }
 
 function renderRewardChoice(state) {
+  if (state.rewardChoices.length === 0) {
+    return {
+      embeds: [{
+        color: COLORS.reward,
+        title: '🏆 戰鬥勝利',
+        description: `你擊敗了 **${state.enemy.name}**。目前沒有符合持有與等級規則的新獎勵。`,
+        footer: { text: `目前共擊敗 ${state.adventure.defeatedUnitCount} 個單位` },
+      }],
+      components: [actionRow([
+        button({
+          customId: gameCustomId(state.id, 'reward-continue'),
+          label: '繼續冒險',
+          style: BUTTON_STYLE.SUCCESS,
+        }),
+        abandonButton(state.id),
+      ])],
+    };
+  }
   const fields = state.rewardChoices.map((choice, index) => {
     const content = rewardContent(choice);
     return {
-      name: `${index + 1}. 【${rarityLabel(choice.rarity)}】${content.name}`,
+      name: `${index + 1}. 【${rarityLabel(choice.rarity)}】${rewardName(choice, content)}`,
       value: rewardDescription(choice, content),
       inline: false,
     };
@@ -192,14 +216,14 @@ function renderRewardChoice(state) {
     embeds: [{
       color: COLORS.reward,
       title: '🏆 戰鬥勝利｜選擇獎勵',
-      description: `你擊敗了 **${state.enemy.name}**。三個選項會各自獨立抽取稀有度，請選擇其中一個。`,
+      description: `你擊敗了 **${state.enemy.name}**。${state.rewardChoices.length} 個可用選項各自獨立抽取稀有度，請選擇其中一個。`,
       fields,
       footer: { text: `目前共擊敗 ${state.adventure.defeatedUnitCount} 個單位` },
     }],
     components: [
       actionRow(state.rewardChoices.map((choice, index) => button({
         customId: gameCustomId(state.id, 'reward', String(index)),
-        label: `${index + 1}. ${rewardContent(choice).name}`,
+        label: `${index + 1}. ${rewardName(choice, rewardContent(choice))}`,
         emoji: rewardContent(choice).emoji,
         style: BUTTON_STYLE.SUCCESS,
       }))),
@@ -209,26 +233,36 @@ function renderRewardChoice(state) {
 }
 
 function renderEvent(state) {
+  const resultStage = state.event.stage === 'result';
+  const components = resultStage
+    ? [actionRow([
+      button({
+        customId: gameCustomId(state.id, 'event-continue'),
+        label: '繼續冒險',
+        style: BUTTON_STYLE.PRIMARY,
+      }),
+      abandonButton(state.id),
+    ])]
+    : [
+      actionRow(state.event.options.map((option) => button({
+        customId: gameCustomId(state.id, 'event-option', option.id),
+        label: option.label,
+        style: BUTTON_STYLE.PRIMARY,
+      }))),
+      actionRow([abandonButton(state.id)]),
+    ];
   return {
     embeds: [{
       color: COLORS.event,
-      title: `【${rarityLabel(state.event.rarity)}奇遇】${state.event.name}`,
-      description: state.event.description,
+      title: resultStage ? '奇遇結果' : `【${rarityLabel(state.event.rarity)}】奇遇`,
+      description: resultStage ? state.event.result.text : state.event.description,
       fields: [{
         name: '冒險進度',
         value: `地區 ${state.adventure.regionDepth}｜本區完成 ${state.adventure.regionProgress} 次遭遇`,
       }],
-      footer: { text: '完成奇遇會增加一次地區進度' },
+      footer: { text: resultStage ? '繼續後會增加一次地區進度' : '奇遇名稱不會顯示' },
     }],
-    components: [actionRow([
-      button({
-        customId: gameCustomId(state.id, 'event-continue'),
-        label: '完成奇遇並繼續',
-        emoji: '🧭',
-        style: BUTTON_STYLE.PRIMARY,
-      }),
-      abandonButton(state.id),
-    ])],
+    components,
   };
 }
 
@@ -239,7 +273,11 @@ function renderEndSummary(state) {
     ? `你被 **${summary?.defeatedBy ?? '未知單位'}** 擊敗了。`
     : '你放棄了本次冒險。';
   const equipment = namesFor(summary?.finalEquipmentIds ?? [], getItem);
-  const skills = namesFor(summary?.finalSkillIds ?? [], getSkill);
+  const skills = (summary?.finalSkillIds ?? []).map((id) => {
+    const skill = getSkill(id);
+    const level = summary?.finalSkillLevels?.[id] ?? 1;
+    return `${skill.name} Lv.${level}`;
+  });
   const achievements = (summary?.newAchievementIds ?? [])
     .map((id) => ACHIEVEMENTS[id]?.name ?? id);
   const unlocks = [
@@ -275,31 +313,39 @@ function combatControls(state) {
   const actionButtons = [button({
     customId: gameCustomId(state.id, 'wager'),
     label: `投入點數（剩餘 ${state.resources.action}）`,
-    emoji: '🎟️',
+    emoji: '❇️',
     style: BUTTON_STYLE.PRIMARY,
     disabled: stunned || state.resources.action < 1,
   })];
 
   for (const skillId of state.player.skillIds) {
     const skill = getSkill(skillId);
+    const skillLevel = state.player.skillLevels?.[skillId] ?? 1;
     actionButtons.push(button({
-      customId: gameCustomId(state.id, 'skill', skill.id),
-      label: `${skill.name}（${skill.cost}法力）`,
+      customId: gameCustomId(state.id, 'detail-skill', skill.id),
+      label: `${skill.name} Lv.${skillLevel}`,
       emoji: skill.emoji,
       style: BUTTON_STYLE.SECONDARY,
-      disabled: stunned || skillUnavailable(state, skill),
+    }));
+  }
+
+  for (const itemId of Object.values(state.player.equipment ?? {})) {
+    const item = getItem(itemId);
+    actionButtons.push(button({
+      customId: gameCustomId(state.id, 'detail-item', item.id),
+      label: item.name,
+      emoji: item.emoji,
+      style: BUTTON_STYLE.SECONDARY,
     }));
   }
   for (const { itemId, quantity } of state.player.inventory ?? []) {
     const item = getItem(itemId);
-    if (item.type !== 'consumable' || quantity < 1) continue;
-    const actionCost = item.actionCost ?? 0;
+    if (quantity < 1) continue;
     actionButtons.push(button({
-      customId: gameCustomId(state.id, 'item', item.id),
-      label: `使用${item.name}${actionCost ? `（${actionCost}行動）` : ''} ×${quantity}`,
+      customId: gameCustomId(state.id, 'detail-item', item.id),
+      label: `${item.name} ×${quantity}`,
       emoji: item.emoji,
       style: BUTTON_STYLE.SECONDARY,
-      disabled: stunned || itemUnavailable(state, item),
     }));
   }
 
@@ -374,17 +420,14 @@ function itemSelect(profile, selectedIds) {
 }
 
 function resourceLine(state) {
-  return [
-    `🎟️ 行動 **${state.resources.action}**`,
-    `🛡️ 護甲 **${state.resources.armor}**`,
-    `✨ 法力 **${state.resources.mana}**`,
-  ].join('　');
+  return `❇️ **${state.resources.action}**　🛡️ **${state.resources.armor}**　✨ **${state.resources.mana}**`;
 }
 
 function loadoutLine(state) {
   const skills = state.player.skillIds.map((id) => {
     const skill = getSkill(id);
-    return `${skill.emoji}${skill.name}（${skill.cost}法力）`;
+    const level = state.player.skillLevels?.[id] ?? 1;
+    return `${skill.emoji}${skill.name} Lv.${level}（${skill.cost}法力）`;
   });
   const equipment = Object.values(state.player.equipment ?? {}).map((id) => {
     const item = getItem(id);
@@ -409,6 +452,7 @@ function lastSpinText(state) {
   const impact = state.lastImpact ?? {};
   const bonuses = [];
   if (impact.statusBonus) bonuses.push(`狀態 +${impact.statusBonus}`);
+  if (impact.damageMultiplier > 1) bonuses.push(`強擊 ×${impact.damageMultiplier}`);
   return [
     formatReels(state.lastSpin.reels),
     `投入 **${state.lastSpin.wager}** 點｜⚔️ ${awarded.attack}　🛡️ ${awarded.defense}　✨ ${awarded.skill}`,
@@ -433,47 +477,19 @@ function lastResolutionText(state) {
   ].filter(Boolean).join('\n');
 }
 
-function activeStatusText(state) {
-  const sides = [
-    ['玩家', state.player.activeStatuses],
-    [state.enemy.name, state.enemy.activeStatuses],
-  ];
-  const lines = sides.flatMap(([label, statuses]) => {
-    if (!statuses?.length) return [];
-    const text = statuses.map((status) => {
-      const definition = getStatus(status.statusId);
-      const stackText = status.stacks > 1 ? `×${status.stacks}` : '';
-      return `${definition.emoji}${definition.name}${stackText}（${status.remainingTurns}回合）`;
-    }).join('、');
-    return `${label}：${text}`;
-  });
-  return lines.length ? lines.join('\n') : null;
-}
-
-function skillUnavailable(state, skill) {
-  if (state.resources.mana < skill.cost) return true;
-  if (skill.effects.every((effect) => effect.type === 'heal' && effect.target === 'self')) {
-    return state.player.hp >= state.player.maxHp;
-  }
-  const selfStatuses = skill.effects
-    .filter((effect) => effect.type === 'apply-status' && effect.target === 'self')
-    .map((effect) => effect.statusId);
-  return selfStatuses.length > 0 && selfStatuses.every((statusId) => {
-    const active = state.player.activeStatuses
-      ?.find((status) => status.statusId === statusId);
-    if (!active) return false;
-    const definition = getStatus(statusId);
-    if (definition.stacking.mode === 'refresh-duration') return true;
-    return Number(active.stacks ?? 1) >= definition.stacking.maxStacks;
-  });
-}
-
-function itemUnavailable(state, item) {
-  const lacksAction = state.resources.action < (item.actionCost ?? 0);
-  const onlyHealsFullHealth = item.effects
-    ?.every((effect) => effect.type === 'heal' && effect.target === 'self')
-    && state.player.hp >= state.player.maxHp;
-  return lacksAction || onlyHealsFullHealth;
+function statusListText(statuses) {
+  if (!statuses?.length) return '無';
+  return statuses.map((status) => {
+    const definition = getStatus(status.statusId);
+    if (definition.durationMode === 'until-consumed') {
+      return `${definition.emoji}${definition.name}（下次拉霸傷害 ×${status.potency}）`;
+    }
+    if (definition.stacking.mode === 'stack-countdown') {
+      return `${definition.emoji}${definition.name} ×${status.stacks}`;
+    }
+    const stackText = status.stacks > 1 ? ` ×${status.stacks}` : '';
+    return `${definition.emoji}${definition.name}${stackText}（${status.remainingTurns}回合）`;
+  }).join('、');
 }
 
 function rewardContent(choice) {
@@ -484,9 +500,18 @@ function rewardContent(choice) {
 
 function rewardDescription(choice, content) {
   if (choice.contentType === 'skill') {
-    return `技能｜法力消耗 ${content.cost}\n${content.description}`;
+    const definition = getSkillLevelDefinition(content.id, choice.targetLevel ?? 1);
+    const acquisition = choice.acquisition === 'level-up'
+      ? `技能升級｜Lv.${choice.currentLevel} → Lv.${choice.targetLevel}`
+      : `新技能｜Lv.${choice.targetLevel ?? 1}`;
+    return `${acquisition}｜法力消耗 ${content.cost}\n${definition.description}`;
   }
   return `${itemTypeLabel(content)}\n${content.description}`;
+}
+
+function rewardName(choice, content) {
+  if (choice.contentType !== 'skill') return content.name;
+  return `${content.name} Lv.${choice.targetLevel ?? 1}`;
 }
 
 function statusEventText(event) {
@@ -522,7 +547,7 @@ function button({ customId, label, emoji, style, disabled = false }) {
     type: COMPONENT_TYPE.BUTTON,
     custom_id: customId,
     label,
-    emoji: { name: emoji },
+    ...(emoji ? { emoji: { name: emoji } } : {}),
     style,
     disabled,
   };

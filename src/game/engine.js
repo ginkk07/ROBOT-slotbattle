@@ -1,7 +1,8 @@
 import { createConfig } from './config.js';
+import { getEvent } from './data/events.js';
 import { getItem } from './data/items.js';
 import { getRegion } from './data/regions.js';
-import { getSkill } from './data/skills.js';
+import { getSkill, getSkillLevelDefinition } from './data/skills.js';
 import { getStatus } from './data/statuses.js';
 import { getUnit, UnitRank } from './data/units.js';
 import {
@@ -10,13 +11,22 @@ import {
   scaleEnemyUnit,
 } from './engines/adventure-engine.js';
 import { applyEffects } from './engines/effects.js';
+import { drawEncounter } from './engines/encounter-engine.js';
+import { resolveEvent } from './engines/event-engine.js';
 import { rollRewardChoices } from './engines/loot-engine.js';
 import { selectMonsterIntent } from './engines/monster-action-engine.js';
+import {
+  grantSkillReward,
+  forgetSkill,
+  normalizePlayerSkills,
+  playerSkillLevel,
+} from './engines/skill-progression.js';
 import { mergeActiveStatus } from './engines/status-engine.js';
+import { randomInteger } from './engines/weighted-random.js';
 import { drawReels } from './random.js';
 import { scoreSpin } from './scoring.js';
 
-export const GAME_STATE_VERSION = 3;
+export const GAME_STATE_VERSION = 4;
 
 export const GameStatus = Object.freeze({
   ACTIVE: 'active',
@@ -74,6 +84,7 @@ export function createGame({
       hp: config.playerMaxHp,
       maxHp: config.playerMaxHp,
       skillIds: selectedSkillIds,
+      skillLevels: Object.fromEntries(selectedSkillIds.map((skillId) => [skillId, 1])),
       inventory: startingItems.inventory,
       equipment: startingItems.equipment,
       damageResistances: { ...playerUnit.damageResistances },
@@ -94,6 +105,8 @@ export function createGame({
     endSummary: null,
     history: [],
   };
+
+  state.player = normalizePlayerSkills(state.player);
 
   startNextNode(state, {
     worldRng,
@@ -152,10 +165,17 @@ export function placeBet(
     return next;
   }
 
-  const statusBonus = outcome.awarded.attack > 0
-    ? attackStatusBonus(next.player)
-    : 0;
-  const requestedAttack = outcome.awarded.attack + statusBonus;
+  const statusBonuses = outcome.awarded.attack > 0
+    ? attackStatusBonuses(next.player)
+    : { attackPower: 0, additionalDamage: 0 };
+  const multiplierResult = outcome.awarded.attack > 0
+    ? consumeSpinDamageMultiplier(next.player)
+    : { player: next.player, multiplier: 1 };
+  next.player = multiplierResult.player;
+  const requestedAttack = (
+    (outcome.awarded.attack + statusBonuses.attackPower)
+    * multiplierResult.multiplier
+  ) + statusBonuses.additionalDamage;
   let attackDamage = 0;
 
   if (requestedAttack > 0) {
@@ -181,7 +201,8 @@ export function placeBet(
     armorGained: outcome.awarded.defense,
     manaGained: outcome.awarded.skill,
     equipmentBonus: 0,
-    statusBonus,
+    statusBonus: statusBonuses.attackPower + statusBonuses.additionalDamage,
+    damageMultiplier: multiplierResult.multiplier,
   };
   next.lastAction = { type: 'spin', text: spinActionText(next.lastImpact) };
 
@@ -202,21 +223,23 @@ export function activateSkill(
   }
 
   const skill = getSkill(skillId);
+  const skillLevel = playerSkillLevel(next.player, skillId);
+  const levelDefinition = getSkillLevelDefinition(skillId, skillLevel);
   if (!Number.isInteger(skill.cost) || skill.cost < 0) {
     throw new Error(`技能 ${skill.name} 尚未設定法力消耗`);
   }
   if (next.resources.mana < skill.cost) {
     throw new RangeError(`${skill.name}需要 ${skill.cost} 點法力`);
   }
-  if (wouldOnlyHealFullHealth(skill, next.player)) {
+  if (wouldOnlyHealFullHealth({ effects: levelDefinition.effects }, next.player)) {
     throw new Error('生命已全滿，現在不需要治療');
   }
-  if (wouldOnlyRefreshActiveStatus(skill, next.player)) {
+  if (wouldOnlyRefreshActiveStatus(levelDefinition.effects, next.player)) {
     throw new Error('這個效果目前仍在持續中');
   }
 
   const result = applyEffects({
-    effects: skill.effects,
+    effects: levelDefinition.effects,
     source: next.player,
     target: next.enemy,
     rng,
@@ -227,12 +250,13 @@ export function activateSkill(
   next.lastAction = {
     type: 'skill',
     id: skill.id,
-    text: `${skill.emoji}${skill.name}：${summarizeEffectEvents(result.events)}`,
+    text: `${skill.emoji}${skill.name} Lv.${skillLevel}：${summarizeEffectEvents(result.events)}`,
   };
   next.history.push({
     type: 'skill',
     round: next.round,
     skillId: skill.id,
+    skillLevel,
     events: result.events,
   });
 
@@ -409,13 +433,77 @@ export function chooseReward(
     text: `選擇了${rewardContentName(choice)}`,
   };
 
-  if (next.pendingRegionAdvance) {
-    next.adventure.regionDepth += 1;
-    next.adventure.regionProgress = 0;
-    next.pendingRegionAdvance = false;
+  advanceAfterReward(next, { worldRng, monsterRng });
+  return next;
+}
+
+export function continueWithoutReward(
+  state,
+  { worldRng = Math.random, monsterRng = Math.random } = {},
+) {
+  const next = upgradeGameState(state);
+  if (
+    next.status !== GameStatus.ACTIVE
+    || next.phase !== GamePhase.REWARD_CHOICE
+    || next.rewardChoices.length > 0
+  ) {
+    throw new Error('目前不能略過獎勵');
+  }
+  next.history.push({ type: 'reward-unavailable' });
+  advanceAfterReward(next, { worldRng, monsterRng });
+  return next;
+}
+
+export function chooseEventOption(
+  state,
+  optionId,
+  {
+    eventRng = Math.random,
+    monsterRng = Math.random,
+  } = {},
+) {
+  const next = upgradeGameState(state);
+  if (next.status !== GameStatus.ACTIVE || next.phase !== GamePhase.EVENT) {
+    throw new Error('目前沒有可選擇的奇遇');
+  }
+  if (next.event.stage !== 'choice') {
+    throw new Error('這個奇遇已經完成選擇');
   }
 
-  startNextNode(next, { worldRng, monsterRng });
+  const resolved = resolveEvent(next.event.eventId, optionId, { rng: eventRng });
+  const outcome = resolved.outcome;
+  next.history.push({
+    type: 'event-option-selected',
+    eventId: next.event.eventId,
+    optionId,
+    outcomeId: outcome.id,
+    outcomeType: outcome.type,
+  });
+
+  if (outcome.type === 'full-heal') {
+    next.player.hp = next.player.maxHp;
+  } else if (outcome.type === 'forget-random-skill') {
+    const skillId = randomSkillId(next.player, eventRng);
+    if (skillId) {
+      next.player = forgetSkill(next.player, skillId);
+      next.event.forgottenSkillId = skillId;
+    }
+  } else if (outcome.type === 'start-combat') {
+    startEventCombat(next, outcome, { rng: eventRng, monsterRng });
+    return next;
+  } else if (outcome.type !== 'continue') {
+    throw new RangeError(`尚未支援的事件結果：${outcome.type}`);
+  }
+
+  const forgottenName = next.event.forgottenSkillId
+    ? `\n你遺忘了「${getSkill(next.event.forgottenSkillId).name}」。`
+    : '';
+  next.event.stage = 'result';
+  next.event.result = {
+    outcomeId: outcome.id,
+    type: outcome.type,
+    text: `${outcome.text}${forgottenName}`,
+  };
   return next;
 }
 
@@ -423,9 +511,21 @@ export function completeEvent(
   state,
   { worldRng = Math.random, monsterRng = Math.random } = {},
 ) {
-  const next = upgradeGameState(state);
+  let next = upgradeGameState(state);
   if (next.status !== GameStatus.ACTIVE || next.phase !== GamePhase.EVENT) {
     throw new Error('目前沒有可完成的奇遇');
+  }
+
+  // 舊版按鈕與模擬器會直接完成奇遇；改版後以離開或第一個選項處理。
+  if (next.event.stage === 'choice') {
+    const event = getEvent(next.event.eventId);
+    const optionId = event.options.find((option) => option.id === 'leave')?.id
+      ?? event.options[0].id;
+    next = chooseEventOption(next, optionId, {
+      eventRng: worldRng,
+      monsterRng,
+    });
+    if (next.phase !== GamePhase.EVENT) return next;
   }
 
   next.history.push({
@@ -460,6 +560,17 @@ export function upgradeGameState(value) {
   const next = structuredClone(value);
   if (next.schemaVersion === GAME_STATE_VERSION) {
     ensureCurrentFields(next);
+    return next;
+  }
+
+  if (next.schemaVersion === 3) {
+    next.schemaVersion = GAME_STATE_VERSION;
+    ensureCurrentFields(next);
+    if (next.endSummary?.finalSkillIds) {
+      next.endSummary.finalSkillLevels ??= Object.fromEntries(
+        next.endSummary.finalSkillIds.map((skillId) => [skillId, 1]),
+      );
+    }
     return next;
   }
 
@@ -502,6 +613,9 @@ function startNextNode(state, {
       name: node.event.name,
       description: node.event.description,
       rarity: node.rarity,
+      stage: 'choice',
+      options: node.event.options.map(({ id, label }) => ({ id, label })),
+      result: null,
     };
     state.history.push({
       type: 'event-started',
@@ -526,6 +640,45 @@ function startNextNode(state, {
   });
 }
 
+function startEventCombat(state, outcome, { rng, monsterRng }) {
+  const region = getRegion(state.adventure.regionId);
+  const tableId = {
+    normal: region.normalEncounterTableId,
+    elite: region.eliteEncounterTableId,
+    boss: region.bossEncounterTableId,
+  }[outcome.rank];
+  if (!tableId) throw new RangeError(`奇遇戰鬥階級不合法：${outcome.rank}`);
+  const unit = drawEncounter(tableId, { rng });
+  const enemy = scaleEnemyUnit(unit, state.adventure.regionDepth, region);
+  const eventId = state.event.eventId;
+
+  state.event = null;
+  state.phase = GamePhase.PLAYER_TURN;
+  state.enemy = enemy;
+  state.enemy.intent = selectMonsterIntent(state.enemy, { rng: monsterRng });
+  state.rewardChoices = [];
+  state.round = 1;
+  clearTurnResources(state);
+  state.resources.action = state.config.actionPointsPerRound;
+  clearCombatPresentation(state);
+  state.player.activeStatuses = [];
+  state.stunned = false;
+  applyBattleStartEquipmentEffects(state);
+  state.lastAction = { type: 'event', text: outcome.text };
+  state.history.push({
+    type: 'event-combat-started',
+    eventId,
+    unitId: state.enemy.unitId,
+    rank: state.enemy.rank,
+  });
+}
+
+function randomSkillId(player, rng) {
+  const skillIds = player.skillIds ?? [];
+  if (skillIds.length === 0) return null;
+  return skillIds[randomInteger(0, skillIds.length - 1, rng)];
+}
+
 function finishCombatVictory(state, { rewardRng }) {
   if (state.phase !== GamePhase.PLAYER_TURN) return;
   const defeated = state.enemy;
@@ -539,6 +692,7 @@ function finishCombatVictory(state, { rewardRng }) {
     rng: rewardRng,
     regionTags: region.tags,
     rarityModifiers: state.adventure.modifiers.rewardRarity,
+    player: state.player,
   });
   state.phase = GamePhase.REWARD_CHOICE;
   state.enemy.intent = null;
@@ -554,6 +708,7 @@ function finishCombatVictory(state, { rewardRng }) {
 
 function finishRun(state, status, defeatedBy) {
   const finalSkillIds = [...(state.player.skillIds ?? [])];
+  const finalSkillLevels = structuredClone(state.player.skillLevels ?? {});
   const finalEquipmentIds = Object.values(state.player.equipment ?? {});
   state.endSummary = {
     runId: state.id,
@@ -565,6 +720,7 @@ function finishRun(state, status, defeatedBy) {
     ),
     finalRegionDepth: state.adventure?.regionDepth ?? 1,
     finalSkillIds,
+    finalSkillLevels,
     finalEquipmentIds,
     newAchievementIds: [],
     newUnlockSkillIds: [],
@@ -593,11 +749,9 @@ function finishRun(state, status, defeatedBy) {
 
 function applyReward(player, choice) {
   if (choice.contentType === 'skill') {
-    getSkill(choice.contentId);
-    if (!player.skillIds.includes(choice.contentId)) {
-      player.skillIds.push(choice.contentId);
-    }
-    return;
+    const granted = grantSkillReward(player, choice.contentId);
+    Object.assign(player, granted.player);
+    return granted;
   }
 
   const item = getItem(choice.contentId);
@@ -611,9 +765,22 @@ function applyReward(player, choice) {
 }
 
 function rewardContentName(choice) {
-  return choice.contentType === 'skill'
-    ? getSkill(choice.contentId).name
-    : getItem(choice.contentId).name;
+  if (choice.contentType === 'skill') {
+    const name = getSkill(choice.contentId).name;
+    return choice.acquisition === 'level-up'
+      ? `${name}升至 Lv.${choice.targetLevel}`
+      : name;
+  }
+  return getItem(choice.contentId).name;
+}
+
+function advanceAfterReward(state, { worldRng, monsterRng }) {
+  if (state.pendingRegionAdvance) {
+    state.adventure.regionDepth += 1;
+    state.adventure.regionProgress = 0;
+    state.pendingRegionAdvance = false;
+  }
+  startNextNode(state, { worldRng, monsterRng });
 }
 
 function assertPlayerCanAct(state) {
@@ -667,20 +834,23 @@ function applyBattleStartEquipmentEffects(state) {
   }
 }
 
-function attackStatusBonus(player) {
-  return (player.activeStatuses ?? []).reduce((total, active) => {
+function attackStatusBonuses(player) {
+  return (player.activeStatuses ?? []).reduce((bonuses, active) => {
     const definition = getStatus(active.statusId);
     const isAttackTrigger = definition.trigger === 'on-attack'
       && definition.effect.type === 'bonus-damage';
     const isAttackModifier = definition.effect.type === 'modify-stat'
       && definition.effect.stat === 'attack';
-    if (!isAttackTrigger && !isAttackModifier) return total;
-    return total + (
+    if (!isAttackTrigger && !isAttackModifier) return bonuses;
+    const amount = (
       Number(definition.effect.amountPerPotency ?? 0)
       * Number(active.potency ?? 1)
       * Number(active.stacks ?? 1)
     );
-  }, 0);
+    if (isAttackModifier) bonuses.attackPower += amount;
+    if (isAttackTrigger) bonuses.additionalDamage += amount;
+    return bonuses;
+  }, { attackPower: 0, additionalDamage: 0 });
 }
 
 function itemActionCost(item) {
@@ -744,11 +914,13 @@ function advanceStatusDurations(unit) {
   next.activeStatuses = (next.activeStatuses ?? [])
     .map((status) => {
       const definition = getStatus(status.statusId);
+      if (definition.durationMode === 'until-consumed') return status;
       if (definition.stacking.mode === 'stack-countdown') return status;
       return { ...status, remainingTurns: Number(status.remainingTurns) - 1 };
     })
     .filter((status) => {
       const definition = getStatus(status.statusId);
+      if (definition.durationMode === 'until-consumed') return true;
       if (definition.stacking.mode === 'stack-countdown') {
         return Number(status.stacks ?? 0) > 0;
       }
@@ -763,8 +935,8 @@ function wouldOnlyHealFullHealth(source, player) {
     && player.hp >= player.maxHp;
 }
 
-function wouldOnlyRefreshActiveStatus(skill, player) {
-  const selfStatuses = skill.effects
+function wouldOnlyRefreshActiveStatus(effects, player) {
+  const selfStatuses = effects
     ?.filter((effect) => effect.type === 'apply-status' && effect.target === 'self')
     .map((effect) => effect.statusId) ?? [];
   return selfStatuses.length > 0
@@ -773,6 +945,7 @@ function wouldOnlyRefreshActiveStatus(skill, player) {
         ?.find((status) => status.statusId === statusId);
       if (!active) return false;
       const definition = getStatus(statusId);
+      if (definition.durationMode === 'until-consumed') return true;
       if (definition.stacking.mode === 'refresh-duration') return true;
       return Number(active.stacks ?? 1) >= definition.stacking.maxStacks;
     });
@@ -783,8 +956,12 @@ function summarizeEffectEvents(events) {
     if (event.type === 'heal') return [`回復 ${event.amount} HP`];
     if (event.type === 'damage') return [`造成 ${event.amount} 傷害`];
     if (event.type === 'apply-status' && event.applied) {
+      const status = getStatus(event.statusId);
+      if (status.durationMode === 'until-consumed') {
+        return [`獲得${status.name}（下次拉霸傷害 ×${event.potency}）`];
+      }
       const stackText = event.stacks > 1 ? `${event.stacks}層` : '';
-      return [`附加${stackText}${getStatus(event.statusId).name}`];
+      return [`附加${stackText}${status.name}`];
     }
     if (event.type === 'apply-status') return ['狀態未生效'];
     if (event.type === 'remove-status') return [`移除 ${event.removed} 個狀態`];
@@ -796,6 +973,7 @@ function summarizeEffectEvents(events) {
 function spinActionText(impact) {
   const parts = [
     impact.attackDamage ? `造成 ${impact.attackDamage} 傷害` : null,
+    impact.damageMultiplier > 1 ? `強擊 ×${impact.damageMultiplier}` : null,
     impact.armorGained ? `護甲 +${impact.armorGained}` : null,
     impact.manaGained ? `法力 +${impact.manaGained}` : null,
   ].filter(Boolean);
@@ -809,7 +987,19 @@ function emptyImpact() {
     manaGained: 0,
     equipmentBonus: 0,
     statusBonus: 0,
+    damageMultiplier: 1,
   };
+}
+
+function consumeSpinDamageMultiplier(player) {
+  const next = structuredClone(player);
+  const index = (next.activeStatuses ?? [])
+    .findIndex((active) => active.statusId === 'power-strike-ready');
+  if (index < 0) return { player: next, multiplier: 1 };
+  const active = next.activeStatuses[index];
+  const multiplier = Math.max(1, Number(active.potency ?? 1));
+  next.activeStatuses.splice(index, 1);
+  return { player: next, multiplier };
 }
 
 function clearTurnResources(state) {
@@ -840,12 +1030,19 @@ function applyEnemyOverrides(enemy, overrides) {
 }
 
 function ensureCurrentFields(state) {
+  state.player = normalizePlayerSkills(state.player);
   state.player.activeStatuses ??= [];
   state.player.inventory ??= [];
   state.player.equipment ??= {};
   state.rewardChoices ??= [];
   state.endSummary ??= null;
   state.stunned = isStunned(state);
+  if (state.event) {
+    const definition = getEvent(state.event.eventId);
+    state.event.stage ??= 'choice';
+    state.event.options ??= definition.options.map(({ id, label }) => ({ id, label }));
+    state.event.result ??= null;
+  }
   if (state.enemy) {
     state.enemy.activeStatuses ??= [];
     state.enemy.intent ??= {
@@ -879,6 +1076,9 @@ function upgradeLegacyState(legacy) {
     itemIds: [],
   };
   next.player.activeStatuses ??= [];
+  next.player.skillLevels ??= Object.fromEntries(
+    (next.player.skillIds ?? []).map((skillId) => [skillId, 1]),
+  );
   next.player.inventory ??= [];
   next.player.equipment ??= {};
   const splitItems = splitEquipmentFromInventory(next.player.inventory);
@@ -925,6 +1125,7 @@ function upgradeLegacyState(legacy) {
       manaGained: 0,
       equipmentBonus: 0,
       statusBonus: 0,
+      damageMultiplier: 1,
     };
   } else {
     next.lastImpact ??= null;
@@ -945,6 +1146,9 @@ function upgradeLegacyState(legacy) {
     defeatedByRank: { normal: 0, elite: 0, boss: 0 },
     finalRegionDepth: 1,
     finalSkillIds: [...(next.player.skillIds ?? [])],
+    finalSkillLevels: Object.fromEntries(
+      (next.player.skillIds ?? []).map((skillId) => [skillId, 1]),
+    ),
     finalEquipmentIds: Object.values(next.player.equipment ?? {}),
     newAchievementIds: [],
     newUnlockSkillIds: [],

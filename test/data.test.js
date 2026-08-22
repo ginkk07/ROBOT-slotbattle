@@ -7,7 +7,7 @@ import { getMonsterActionRule } from '../src/game/data/monster-actions.js';
 import { getMonsterSkill } from '../src/game/data/monster-skills.js';
 import { PLAYER_PROGRESSION_RULES } from '../src/game/data/player-progression.js';
 import { getRegion } from '../src/game/data/regions.js';
-import { getSkill } from '../src/game/data/skills.js';
+import { getSkill, getSkillLevelDefinition } from '../src/game/data/skills.js';
 import { getStatus } from '../src/game/data/statuses.js';
 import { getUnit } from '../src/game/data/units.js';
 import { validateGameData } from '../src/game/data/validate.js';
@@ -38,12 +38,33 @@ test('玩家技能與道具共用effects，怪物技能使用獨立資料庫', (
     target: 'self',
   });
   assert.equal(getSkill('power-strike').cost, 2);
-  assert.equal(getSkill('fire-imbue').effects[0].statusId, 'fire-imbue');
+  assert.deepEqual(
+    getSkill('power-strike').levels.map((level) => level.effects[0].potency),
+    [2, 3, 4],
+  );
+  assert.deepEqual(
+    getSkill('life-recovery').levels.map((level) => level.effects[0].amount),
+    [5, 10, 15],
+  );
+  assert.deepEqual(
+    getSkill('fire-imbue').levels.map((level) => level.effects[0].potency),
+    [1, 2, 3],
+  );
   assert.equal(getItem('fire-bomb').effects[1].statusId, 'burning');
   assert.equal(getItem('fire-bomb').effects[1].stacks, 3);
-  assert.equal(getSkill('flame-impact').effects[0].amount, 3);
-  assert.equal(getSkill('flame-impact').effects[1].chance, 0.5);
-  assert.equal(getSkill('flame-impact').effects[1].stacks, 3);
+  assert.deepEqual(
+    getSkill('flame-impact').levels.map((level) => level.effects[0].amount),
+    [5, 5, 5],
+  );
+  assert.deepEqual(
+    getSkill('flame-impact').levels.map((level) => level.effects[1].chance),
+    [0.6, 0.6, 0.6],
+  );
+  assert.deepEqual(
+    getSkill('flame-impact').levels.map((level) => level.effects[1].stacks),
+    [3, 4, 5],
+  );
+  assert.match(getSkillLevelDefinition('flame-impact', 3).description, /5 層燃燒/);
   assert.equal(getItem('healing-potion').actionCost, 0);
   assert.equal(getItem('flame-sword').type, 'equipment');
   assert.equal(getItem('flame-sword').battleStartEffects[0].statusId, 'attack-up');
@@ -78,4 +99,6 @@ test('可調整的全域平衡規則集中在資料層', () => {
   assert.equal(region.scaling.baseDamagePerDepth, 0.2);
   assert.equal(PLAYER_PROGRESSION_RULES.startingSkillSlots, 1);
   assert.equal(PLAYER_PROGRESSION_RULES.startingItemSlots, 1);
+  assert.equal(PLAYER_PROGRESSION_RULES.maxHeldSkills, 3);
+  assert.equal(PLAYER_PROGRESSION_RULES.maxSkillLevel, 3);
 });
