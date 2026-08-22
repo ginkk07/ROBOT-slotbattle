@@ -140,6 +140,76 @@ test('其他玩家無法操作別人的戰鬥面板', async () => {
   );
 });
 
+test('技能按鈕先回傳私人詳情，可用時才提供使用按鈕', async () => {
+  const store = new MemoryGameStore();
+  const controller = controllerFor(store, 'skill-detail-controller');
+  await controller.handleCommand({
+    commandName: 'slotbattle',
+    subcommand: 'profile',
+    userId: 'player-1',
+  });
+  await controller.handleComponent({
+    customId: 'slotbattle-profile:skill',
+    userId: 'player-1',
+    values: ['power-strike'],
+  });
+  await controller.handleCommand({
+    commandName: 'slotbattle',
+    subcommand: 'start',
+    userId: 'player-1',
+  });
+
+  const unavailable = await controller.handleComponent({
+    customId: 'slotbattle:skill-detail-controller:detail-skill:power-strike',
+    userId: 'player-1',
+  });
+  assert.equal(unavailable.ephemeral, true);
+  assert.deepEqual(
+    unavailable.payload.components[0].components.map((component) => component.label),
+    ['關閉'],
+  );
+
+  const record = await store.getSession('skill-detail-controller');
+  record.state.resources.mana = 2;
+  await store.saveSession(record.state, { expectedRevision: record.revision });
+  const usable = await controller.handleComponent({
+    customId: 'slotbattle:skill-detail-controller:detail-skill:power-strike',
+    userId: 'player-1',
+  });
+  assert.deepEqual(
+    usable.payload.components[0].components.map((component) => component.label),
+    ['使用', '關閉'],
+  );
+
+  const used = await controller.handleComponent({
+    customId: 'slotbattle:skill-detail-controller:skill:power-strike',
+    userId: 'player-1',
+  });
+  const saved = await store.getSession('skill-detail-controller');
+  assert.equal(used.ephemeral, false);
+  assert.equal(saved.state.resources.mana, 0);
+  assert.ok(saved.state.player.activeStatuses.some((status) => (
+    status.statusId === 'power-strike-ready'
+  )));
+});
+
+test('詳情關閉按鈕會清除私人說明內容', async () => {
+  const store = new MemoryGameStore();
+  const controller = controllerFor(store, 'detail-close-controller');
+  await controller.handleCommand({
+    commandName: 'slotbattle',
+    subcommand: 'start',
+    userId: 'player-1',
+  });
+
+  const closed = await controller.handleComponent({
+    customId: 'slotbattle:detail-close-controller:detail-close',
+    userId: 'player-1',
+  });
+  assert.equal(closed.payload.content, '已關閉技能／道具說明。');
+  assert.deepEqual(closed.payload.components, []);
+});
+
 test('主動放棄會結算永久紀錄並清除本輪配置', async () => {
   const store = new MemoryGameStore();
   const controller = controllerFor(store, 'abandon-run');

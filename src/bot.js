@@ -85,8 +85,18 @@ async function handleComponent(interaction) {
     return;
   }
 
-  if (result.payload) await interaction.update(result.payload);
-  else await interaction.deferUpdate();
+  if (result.payload) {
+    if (result.ephemeral) {
+      await interaction.reply({
+        ...result.payload,
+        flags: MessageFlags.Ephemeral,
+      });
+    } else {
+      await interaction.update(result.payload);
+    }
+  } else {
+    await interaction.deferUpdate();
+  }
   for (const followUp of result.followUps) {
     await interaction.followUp(followUp);
   }

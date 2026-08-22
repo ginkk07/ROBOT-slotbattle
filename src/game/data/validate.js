@@ -50,6 +50,7 @@ export function validateGameData() {
     const effects = [
       ...(source.effects ?? []),
       ...(source.battleStartEffects ?? []),
+      ...(source.levels ?? []).flatMap((level) => level.effects ?? []),
     ];
     for (const effect of effects) {
       if (effect.statusId) {
@@ -116,9 +117,33 @@ export function validateGameData() {
     if (!Object.values(EventRarity).includes(event.rarity)) {
       errors.push(`事件 ${event.id} 的 rarity 不合法`);
     }
-    for (const outcome of event.outcomes) {
-      if (outcome.type !== 'continue') {
-        errors.push(`事件 ${event.id} 的結果類型不合法：${outcome.type}`);
+    if (!Array.isArray(event.options) || event.options.length === 0) {
+      errors.push(`事件 ${event.id} 至少需要一個選項`);
+      continue;
+    }
+    for (const option of event.options) {
+      if (!option.id || !option.label) {
+        errors.push(`事件 ${event.id} 的選項需要 id 與 label`);
+      }
+      if (!Array.isArray(option.outcomes) || option.outcomes.length === 0) {
+        errors.push(`事件 ${event.id} 的選項 ${option.id} 至少需要一個結果`);
+        continue;
+      }
+      for (const outcome of option.outcomes) {
+        if (![
+          'continue',
+          'full-heal',
+          'forget-random-skill',
+          'start-combat',
+        ].includes(outcome.type)) {
+          errors.push(`事件 ${event.id} 的結果類型不合法：${outcome.type}`);
+        }
+        if (!Number.isFinite(outcome.weight) || outcome.weight <= 0) {
+          errors.push(`事件 ${event.id} 的結果權重必須大於0`);
+        }
+        if (outcome.type === 'start-combat' && !['normal', 'elite', 'boss'].includes(outcome.rank)) {
+          errors.push(`事件 ${event.id} 的戰鬥階級不合法：${outcome.rank}`);
+        }
       }
     }
   }
@@ -169,6 +194,8 @@ export function validateGameData() {
   for (const [key, slots] of Object.entries({
     startingSkillSlots: PLAYER_PROGRESSION_RULES.startingSkillSlots,
     startingItemSlots: PLAYER_PROGRESSION_RULES.startingItemSlots,
+    maxHeldSkills: PLAYER_PROGRESSION_RULES.maxHeldSkills,
+    maxSkillLevel: PLAYER_PROGRESSION_RULES.maxSkillLevel,
   })) {
     if (!Number.isInteger(slots) || slots < 1) {
       errors.push(`玩家開局規則 ${key} 必須是正整數`);
@@ -185,6 +212,25 @@ export function validateGameData() {
     > PLAYER_PROGRESSION_RULES.defaultUnlockedStartingItemIds.length
   ) {
     errors.push('開局道具欄位不可多於預設解鎖道具數');
+  }
+  if (PLAYER_PROGRESSION_RULES.startingSkillSlots > PLAYER_PROGRESSION_RULES.maxHeldSkills) {
+    errors.push('開局技能欄位不可多於冒險技能持有上限');
+  }
+  for (const skill of Object.values(SKILLS)) {
+    const levels = skill.levels?.length ?? 1;
+    if (levels !== PLAYER_PROGRESSION_RULES.maxSkillLevel) {
+      errors.push(
+        `技能 ${skill.id} 必須定義 ${PLAYER_PROGRESSION_RULES.maxSkillLevel} 個等級`,
+      );
+    }
+    for (const [index, level] of (skill.levels ?? []).entries()) {
+      if (typeof level.description !== 'string' || !level.description.trim()) {
+        errors.push(`技能 ${skill.id} 的 Lv.${index + 1} 缺少說明`);
+      }
+      if (!Array.isArray(level.effects) || level.effects.length === 0) {
+        errors.push(`技能 ${skill.id} 的 Lv.${index + 1} 缺少效果`);
+      }
+    }
   }
 
   for (const achievement of Object.values(ACHIEVEMENTS)) {

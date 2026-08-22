@@ -213,6 +213,36 @@ test('投入按鈕會開啟Modal，送出數字後直接更新戰鬥訊息', asy
   assert.equal(body.data.embeds[0].title, '🎰 地區 1｜第 1 回合');
 });
 
+test('技能按鈕會回傳只有玩家看得到的詳情卡', async () => {
+  const store = new MemoryGameStore();
+  const worker = createWorker({
+    verifyRequest: async () => true,
+    storeFactory: () => store,
+  });
+  const startResponse = await worker.fetch(
+    interactionRequest(commandInteraction('start')),
+    ENVIRONMENT,
+    {},
+  );
+  const startBody = await startResponse.json();
+  const detailCustomId = startBody.data.components[0].components[1].custom_id;
+
+  const detailResponse = await worker.fetch(
+    interactionRequest(componentInteraction(detailCustomId)),
+    ENVIRONMENT,
+    {},
+  );
+  const detailBody = await detailResponse.json();
+
+  assert.equal(detailBody.type, 4);
+  assert.equal(detailBody.data.flags, 64);
+  assert.match(detailBody.data.embeds[0].title, /治癒 Lv\.1/);
+  assert.deepEqual(
+    detailBody.data.components[0].components.map((component) => component.label),
+    ['關閉'],
+  );
+});
+
 test('開局配置選單會保存選擇並更新私人訊息', async () => {
   const store = new MemoryGameStore();
   const worker = createWorker({

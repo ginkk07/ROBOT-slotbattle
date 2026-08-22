@@ -102,16 +102,99 @@ test('三個戰鬥獎勵選項會各自獨立抽取稀有度', () => {
   assert.equal(choices.length, 3);
 });
 
-test('Boss的三個戰鬥獎勵選項都必定為傳說', () => {
+test('Boss獎勵維持傳說，內容不足時不會用重複選項補滿', () => {
   const choices = rollRewardChoices('ruins-boss-loot', {
     regionTags: ['ruins'],
     rng: sequence([0, 0, 0.5, 0.5, 0.9, 0.9]),
   });
-  assert.deepEqual(choices.map((choice) => choice.rarity), [
-    'legendary',
-    'legendary',
-    'legendary',
-  ]);
+  assert.equal(choices.length, 2);
+  assert.deepEqual(choices.map((choice) => choice.rarity), ['legendary', 'legendary']);
+  assert.equal(new Set(choices.map((choice) => choice.contentId)).size, 2);
+});
+
+test('持有但未滿等的技能可再次出現並升級，滿等後會排除', () => {
+  const upgradeChoices = rollRewardChoices('ruins-common-loot', {
+    regionTags: ['ruins'],
+    rng: () => 0,
+    player: {
+      skillIds: ['power-strike'],
+      skillLevels: { 'power-strike': 1 },
+      inventory: [],
+      equipment: {},
+    },
+  });
+  const powerStrike = upgradeChoices.find((choice) => (
+    choice.contentId === 'power-strike'
+  ));
+  assert.deepEqual(
+    {
+      acquisition: powerStrike.acquisition,
+      currentLevel: powerStrike.currentLevel,
+      targetLevel: powerStrike.targetLevel,
+    },
+    { acquisition: 'level-up', currentLevel: 1, targetLevel: 2 },
+  );
+
+  const maxedChoices = rollRewardChoices('ruins-common-loot', {
+    regionTags: ['ruins'],
+    rng: () => 0,
+    player: {
+      skillIds: ['power-strike'],
+      skillLevels: { 'power-strike': 3 },
+      inventory: [],
+      equipment: {},
+    },
+  });
+  assert.equal(
+    maxedChoices.some((choice) => choice.contentId === 'power-strike'),
+    false,
+  );
+});
+
+test('技能滿3個後不再出現新技能，但仍可出現未滿等技能升級', () => {
+  const choices = rollRewardChoices('ruins-common-loot', {
+    regionTags: ['ruins'],
+    rng: () => 0,
+    player: {
+      skillIds: ['power-strike', 'fire-imbue', 'flame-impact'],
+      skillLevels: {
+        'power-strike': 1,
+        'fire-imbue': 1,
+        'flame-impact': 1,
+      },
+      inventory: [],
+      equipment: {},
+    },
+  });
+
+  assert.equal(choices.some((choice) => choice.contentId === 'life-recovery'), false);
+  assert.equal(choices.some((choice) => choice.contentId === 'power-strike'), true);
+});
+
+test('已持有的裝備與消耗品不會再次出現在獎勵中', () => {
+  const legendary = rollRewardChoices('ruins-boss-loot', {
+    regionTags: ['ruins'],
+    rng: () => 0,
+    player: {
+      skillIds: [],
+      skillLevels: {},
+      inventory: [],
+      equipment: { weapon: 'flame-sword' },
+    },
+  });
+  assert.equal(legendary.some((choice) => choice.contentId === 'flame-sword'), false);
+
+  const common = rollRewardChoices('ruins-common-loot', {
+    regionTags: ['ruins'],
+    rng: () => 0,
+    player: {
+      skillIds: [],
+      skillLevels: {},
+      inventory: [{ itemId: 'healing-potion', quantity: 1 }],
+      equipment: {},
+    },
+  });
+  assert.equal(common.some((choice) => choice.contentId === 'healing-potion'), false);
 });
 
 test('換區只線性增加敵人的基礎生命與基礎傷害', () => {

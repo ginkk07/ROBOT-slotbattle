@@ -3,8 +3,10 @@ import { randomInt } from 'node:crypto';
 import { getSkill } from '../src/game/data/skills.js';
 import {
   activateSkill,
+  chooseEventOption,
   chooseReward,
   completeEvent,
+  continueWithoutReward,
   createGame,
   endPlayerTurn,
   GamePhase,
@@ -46,17 +48,27 @@ function simulate(strategy, iterations) {
 
     while (state.status === GameStatus.ACTIVE && turns < 500) {
       if (state.phase === GamePhase.REWARD_CHOICE) {
-        state = chooseReward(state, 0, {
-          worldRng: probabilityRng,
-          monsterRng: probabilityRng,
-        });
+        state = state.rewardChoices.length
+          ? chooseReward(state, 0, {
+            worldRng: probabilityRng,
+            monsterRng: probabilityRng,
+          })
+          : continueWithoutReward(state, {
+            worldRng: probabilityRng,
+            monsterRng: probabilityRng,
+          });
         continue;
       }
       if (state.phase === GamePhase.EVENT) {
-        state = completeEvent(state, {
-          worldRng: probabilityRng,
-          monsterRng: probabilityRng,
-        });
+        state = state.event.stage === 'choice'
+          ? chooseEventOption(state, state.event.options[0].id, {
+            eventRng: probabilityRng,
+            monsterRng: probabilityRng,
+          })
+          : completeEvent(state, {
+            worldRng: probabilityRng,
+            monsterRng: probabilityRng,
+          });
         continue;
       }
 

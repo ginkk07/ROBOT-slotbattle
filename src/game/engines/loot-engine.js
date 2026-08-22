@@ -2,6 +2,7 @@ import { ITEMS } from '../data/items.js';
 import { getLootTable } from '../data/loot-tables.js';
 import { ContentRarity } from '../data/rarities.js';
 import { SKILLS } from '../data/skills.js';
+import { skillRewardEligibility } from './skill-progression.js';
 import { pickWeighted } from './weighted-random.js';
 
 export function rollRewardChoices(
@@ -10,6 +11,7 @@ export function rollRewardChoices(
     rng = Math.random,
     regionTags = [],
     rarityModifiers = {},
+    player = { skillIds: [], skillLevels: {}, inventory: [], equipment: {} },
   } = {},
 ) {
   const table = getLootTable(lootTableId);
@@ -17,17 +19,14 @@ export function rollRewardChoices(
 
   for (let roll = 0; roll < table.choices; roll += 1) {
     const rarity = rollContentRarity(table.rarityWeights, rarityModifiers, rng);
-    const fullPool = rewardPool(rarity, regionTags);
+    const fullPool = rewardPool(rarity, regionTags, player);
     const unusedPool = fullPool.filter((entry) => (
       !choices.some((choice) => (
         choice.contentType === entry.contentType && choice.contentId === entry.contentId
       ))
     ));
-    const selected = pickWeighted(
-      unusedPool.length > 0 ? unusedPool : fullPool,
-      rng,
-      (entry) => entry.lootWeight,
-    );
+    if (unusedPool.length === 0) continue;
+    const selected = pickWeighted(unusedPool, rng, (entry) => entry.lootWeight);
     choices.push({ ...selected, rarity });
   }
 
@@ -52,25 +51,35 @@ function rollContentRarity(baseWeights, modifiers, rng) {
   return pickWeighted(entries, rng).rarity;
 }
 
-function rewardPool(rarity, regionTags) {
+function rewardPool(rarity, regionTags, player) {
   const skills = Object.values(SKILLS)
     .filter((skill) => eligible(skill, rarity, regionTags))
-    .map((skill) => ({
-      contentType: 'skill',
-      contentId: skill.id,
-      lootWeight: skill.lootWeight,
-    }));
+    .flatMap((skill) => {
+      const eligibility = skillRewardEligibility(player, skill.id);
+      return eligibility ? [{
+        contentType: 'skill',
+        contentId: skill.id,
+        lootWeight: skill.lootWeight,
+        ...eligibility,
+      }] : [];
+    });
+  const ownedItems = new Set([
+    ...Object.values(player.equipment ?? {}),
+    ...(player.inventory ?? [])
+      .filter((entry) => entry.quantity > 0)
+      .map((entry) => entry.itemId),
+  ]);
   const items = Object.values(ITEMS)
-    .filter((item) => eligible(item, rarity, regionTags))
+    .filter((item) => (
+      eligible(item, rarity, regionTags) && !ownedItems.has(item.id)
+    ))
     .map((item) => ({
       contentType: 'item',
       contentId: item.id,
       lootWeight: item.lootWeight,
+      acquisition: 'acquire',
     }));
   const pool = [...skills, ...items];
-  if (pool.length === 0) {
-    throw new RangeError(`${rarity} 稀有度沒有可抽取的技能或道具`);
-  }
   return pool;
 }
 
