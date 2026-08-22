@@ -213,7 +213,7 @@ test('投入按鈕會開啟Modal，送出數字後直接更新戰鬥訊息', asy
   assert.equal(body.data.embeds[0].title, '🎰 地區 1｜第 1 回合');
 });
 
-test('技能按鈕會回傳只有玩家看得到的詳情卡', async () => {
+test('技能按鈕會在原戰鬥訊息顯示詳情卡', async () => {
   const store = new MemoryGameStore();
   const worker = createWorker({
     verifyRequest: async () => true,
@@ -234,8 +234,7 @@ test('技能按鈕會回傳只有玩家看得到的詳情卡', async () => {
   );
   const detailBody = await detailResponse.json();
 
-  assert.equal(detailBody.type, 4);
-  assert.equal(detailBody.data.flags, 64);
+  assert.equal(detailBody.type, 7);
   assert.match(detailBody.data.embeds[0].title, /治癒 Lv\.1/);
   assert.deepEqual(
     detailBody.data.components[0].components.map((component) => component.label),
