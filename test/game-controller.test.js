@@ -65,6 +65,36 @@ test('投入按鈕先開啟Modal，送出數字後才更新戰鬥', async () => 
   assert.ok(saved.state.enemy.hp < saved.state.enemy.maxHp);
 });
 
+test('擊敗敵人後先在原戰鬥面板確認，再顯示獎勵', async () => {
+  const store = new MemoryGameStore();
+  const controller = controllerFor(store, 'victory-confirm-controller');
+  await controller.handleCommand({
+    commandName: 'slotbattle',
+    subcommand: 'start',
+    userId: 'player-1',
+  });
+  const record = await store.getSession('victory-confirm-controller');
+  record.state.enemy.hp = 1;
+  await store.saveSession(record.state, { expectedRevision: record.revision });
+
+  const defeated = await controller.handleModal({
+    customId: 'slotbattle:victory-confirm-controller:wager-submit',
+    userId: 'player-1',
+    fields: { wager: '1' },
+  });
+  assert.match(defeated.payload.embeds[0].fields[1].name, /HP　0\//);
+  assert.deepEqual(
+    defeated.payload.components[0].components.map((component) => component.label),
+    ['確認'],
+  );
+
+  const confirmed = await controller.handleComponent({
+    customId: 'slotbattle:victory-confirm-controller:victory-confirm',
+    userId: 'player-1',
+  });
+  assert.equal(confirmed.payload.embeds[0].title, '🏆 戰鬥勝利｜選擇獎勵');
+});
+
 test('Modal拒絕小數與超過剩餘行動點的投入', async () => {
   const store = new MemoryGameStore();
   const controller = controllerFor(store, 'invalid-wager');

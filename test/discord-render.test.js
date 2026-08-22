@@ -11,6 +11,7 @@ import {
 import { renderContentDetail } from '../src/discord/content-detail.js';
 import {
   abandonGame,
+  confirmCombatVictory,
   createGame,
   GamePhase,
   placeBet,
@@ -160,7 +161,7 @@ test('裝備詳情只顯示關閉，消耗品可用時顯示使用', () => {
   );
 });
 
-test('戰鬥勝利後只顯示未持有或可升級的獨立獎勵', () => {
+test('戰鬥勝利先顯示敵人生命0與確認按鈕，確認後才顯示獎勵', () => {
   let state = createGame({
     id: 'reward-render-test',
     ownerId: 'player-1',
@@ -174,6 +175,15 @@ test('戰鬥勝利後只顯示未持有或可升級的獨立獎勵', () => {
     reels: [SymbolId.ATTACK, SymbolId.ATTACK, SymbolId.DEFENSE],
     rewardRng: () => 0,
   });
+  const victoryPayload = renderGame(state);
+
+  assert.match(victoryPayload.embeds[0].fields[1].name, /HP　0\//);
+  assert.deepEqual(
+    victoryPayload.components[0].components.map((component) => component.label),
+    ['確認'],
+  );
+
+  state = confirmCombatVictory(state, { rewardRng: () => 0 });
   const payload = renderGame(state);
 
   assert.equal(payload.embeds[0].title, '🏆 戰鬥勝利｜選擇獎勵');
