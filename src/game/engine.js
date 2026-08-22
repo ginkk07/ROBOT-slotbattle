@@ -165,16 +165,17 @@ export function placeBet(
     return next;
   }
 
-  const statusBonus = outcome.awarded.attack > 0
-    ? attackStatusBonus(next.player)
-    : 0;
+  const statusBonuses = outcome.awarded.attack > 0
+    ? attackStatusBonuses(next.player)
+    : { attackPower: 0, additionalDamage: 0 };
   const multiplierResult = outcome.awarded.attack > 0
     ? consumeSpinDamageMultiplier(next.player)
     : { player: next.player, multiplier: 1 };
   next.player = multiplierResult.player;
   const requestedAttack = (
-    outcome.awarded.attack + statusBonus
-  ) * multiplierResult.multiplier;
+    (outcome.awarded.attack + statusBonuses.attackPower)
+    * multiplierResult.multiplier
+  ) + statusBonuses.additionalDamage;
   let attackDamage = 0;
 
   if (requestedAttack > 0) {
@@ -200,7 +201,7 @@ export function placeBet(
     armorGained: outcome.awarded.defense,
     manaGained: outcome.awarded.skill,
     equipmentBonus: 0,
-    statusBonus,
+    statusBonus: statusBonuses.attackPower + statusBonuses.additionalDamage,
     damageMultiplier: multiplierResult.multiplier,
   };
   next.lastAction = { type: 'spin', text: spinActionText(next.lastImpact) };
@@ -833,20 +834,23 @@ function applyBattleStartEquipmentEffects(state) {
   }
 }
 
-function attackStatusBonus(player) {
-  return (player.activeStatuses ?? []).reduce((total, active) => {
+function attackStatusBonuses(player) {
+  return (player.activeStatuses ?? []).reduce((bonuses, active) => {
     const definition = getStatus(active.statusId);
     const isAttackTrigger = definition.trigger === 'on-attack'
       && definition.effect.type === 'bonus-damage';
     const isAttackModifier = definition.effect.type === 'modify-stat'
       && definition.effect.stat === 'attack';
-    if (!isAttackTrigger && !isAttackModifier) return total;
-    return total + (
+    if (!isAttackTrigger && !isAttackModifier) return bonuses;
+    const amount = (
       Number(definition.effect.amountPerPotency ?? 0)
       * Number(active.potency ?? 1)
       * Number(active.stacks ?? 1)
     );
-  }, 0);
+    if (isAttackModifier) bonuses.attackPower += amount;
+    if (isAttackTrigger) bonuses.additionalDamage += amount;
+    return bonuses;
+  }, { attackPower: 0, additionalDamage: 0 });
 }
 
 function itemActionCost(item) {

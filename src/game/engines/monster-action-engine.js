@@ -27,9 +27,15 @@ export function selectMonsterIntent(unit, { rng = Math.random } = {}) {
     name: skill.name,
     skillId: skill.id,
     power: skill.power,
-    damage: Math.ceil(unit.baseDamage * skill.power),
+    damage: monsterSkillDamage(unit, skill.power),
     effects: structuredClone(skill.effects ?? []),
   };
+}
+
+function monsterSkillDamage(unit, skillMultiplier) {
+  const baseDamage = unit.baseDamageBeforeScaling ?? unit.baseDamage;
+  const regionMultiplier = unit.regionMultipliers?.baseDamage ?? 1;
+  return Math.ceil(baseDamage * regionMultiplier * skillMultiplier);
 }
 
 function probabilityRoll(rng) {
