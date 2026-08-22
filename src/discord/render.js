@@ -140,49 +140,41 @@ export function renderWagerModal(state) {
 }
 
 function renderCombat(state) {
+  const enemyField = {
+    name: `👹 ${rankLabel(state.enemy.rank)}${state.enemy.name} HP　${state.enemy.hp}/${state.enemy.maxHp}`,
+    value: [
+      healthBar(state.enemy.hp, state.enemy.maxHp, '🟥'),
+      '**敵人狀態**',
+      statusListText(state.enemy.activeStatuses),
+    ].join('\n'),
+    inline: false,
+  };
+  const playerField = {
+    name: `👤 玩家 HP　${state.player.hp}/${state.player.maxHp}`,
+    value: [
+      healthBar(state.player.hp, state.player.maxHp, '🟩'),
+      '**玩家狀態**',
+      statusListText(state.player.activeStatuses),
+      '',
+      resourceLine(state),
+    ].join('\n'),
+    inline: false,
+  };
+  const fields = [enemyField];
+  const lastSpin = lastSpinText(state);
+  if (lastSpin) {
+    fields.push({ name: '\u200b', value: lastSpin, inline: false });
+  }
+  fields.push(playerField);
+
   const embed = {
     color: state.phase === GamePhase.VICTORY_CONFIRM
       ? COLORS.reward
       : COLORS.active,
     title: `🎰 地區 ${state.adventure.regionDepth}｜第 ${state.round} 回合`,
     description: combatDescription(state),
-    fields: [
-      {
-        name: `👤 玩家 HP　${state.player.hp}/${state.player.maxHp}`,
-        value: healthBar(state.player.hp, state.player.maxHp, '🟩'),
-        inline: false,
-      },
-      {
-        name: `👹 ${rankLabel(state.enemy.rank)}${state.enemy.name} HP　${state.enemy.hp}/${state.enemy.maxHp}`,
-        value: healthBar(state.enemy.hp, state.enemy.maxHp, '🟥'),
-        inline: false,
-      },
-      {
-        name: '冒險進度',
-        value: `本區完成 ${state.adventure.regionProgress} 次遭遇｜總擊敗 ${state.adventure.defeatedUnitCount} 個單位`,
-        inline: false,
-      },
-      { name: '本回合資源', value: resourceLine(state), inline: false },
-      { name: '目前配置', value: loadoutLine(state), inline: false },
-    ],
-    footer: { text: '行動點、護甲與法力都會在回合結束時清空' },
+    fields,
   };
-
-  const lastSpin = lastSpinText(state);
-  if (lastSpin) embed.fields.push({ name: '🎰 最近一次拉霸', value: lastSpin });
-  if (state.lastAction && state.lastAction.type !== 'spin') {
-    embed.fields.push({ name: '最近行動', value: state.lastAction.text });
-  }
-  const lastResolution = lastResolutionText(state);
-  if (lastResolution) embed.fields.push({ name: '📜 上回合結果', value: lastResolution });
-  embed.fields.push({
-    name: '玩家狀態',
-    value: statusListText(state.player.activeStatuses),
-  });
-  embed.fields.push({
-    name: `敵人狀態｜${state.enemy.name}`,
-    value: statusListText(state.enemy.activeStatuses),
-  });
 
   return { embeds: [embed], components: combatControls(state) };
 }
@@ -374,10 +366,7 @@ function combatControls(state) {
 
 function combatDescription(state) {
   if (state.phase === GamePhase.VICTORY_CONFIRM) {
-    return [
-      `**你擊敗了 ${state.enemy.name}！**`,
-      '敵人生命已降至 0，按下「確認」查看戰鬥結果與獎勵。',
-    ].join('\n');
+    return `**戰鬥結果：** 已擊敗 ${state.enemy.name}，按下「確認」查看獎勵。`;
   }
 
   const intent = getEnemyIntent(state);
@@ -385,15 +374,9 @@ function combatDescription(state) {
     ? `${intent.name}，預計造成 ${intent.damage} 點傷害`
     : '尚未決定';
   if (isStunned(state)) {
-    return [
-      '**你陷入暈眩，本回合只能按「回合結束」。**',
-      `敵人行動預告：${intentText}`,
-    ].join('\n');
+    return `**行動預告：** ${intentText}｜你目前暈眩，只能結束回合。`;
   }
-  return [
-    `**敵人行動預告：${intentText}**`,
-    '可繼續投入、使用技能／道具，或自行結束回合。',
-  ].join('\n');
+  return `**行動預告：** ${intentText}`;
 }
 
 function skillSelect(profile, selectedIds) {
@@ -440,58 +423,22 @@ function resourceLine(state) {
   return `❇️ **${state.resources.action}**　🛡️ **${state.resources.armor}**　✨ **${state.resources.mana}**`;
 }
 
-function loadoutLine(state) {
-  const skills = state.player.skillIds.map((id) => {
-    const skill = getSkill(id);
-    const level = state.player.skillLevels?.[id] ?? 1;
-    return `${skill.emoji}${skill.name} Lv.${level}（${skill.cost}法力）`;
-  });
-  const equipment = Object.values(state.player.equipment ?? {}).map((id) => {
-    const item = getItem(id);
-    return `${item.emoji}${item.name}（已裝備）`;
-  });
-  const inventory = (state.player.inventory ?? []).map(({ itemId, quantity }) => {
-    const item = getItem(itemId);
-    return `${item.emoji}${item.name}×${quantity}`;
-  });
-  return [
-    `技能：${skills.join('、') || '沒有技能'}`,
-    `道具：${[...equipment, ...inventory].join('、') || '沒有道具'}`,
-  ].join('\n');
-}
-
 function lastSpinText(state) {
   if (!state.lastSpin) return null;
-  if (state.lastSpin.stunned) {
-    return `${formatReels(state.lastSpin.reels)}\n三個不幸：失去本回合資源並陷入暈眩。`;
-  }
-  const awarded = state.lastSpin.awarded;
-  const impact = state.lastImpact ?? {};
-  const bonuses = [];
-  if (impact.statusBonus) bonuses.push(`狀態 +${impact.statusBonus}`);
-  if (impact.damageMultiplier > 1) bonuses.push(`強擊 ×${impact.damageMultiplier}`);
-  return [
-    formatReels(state.lastSpin.reels),
-    `投入 **${state.lastSpin.wager}** 點｜⚔️ ${awarded.attack}　🛡️ ${awarded.defense}　✨ ${awarded.skill}`,
-    `立即結果：${state.lastAction?.text ?? '沒有產生效果'}${bonuses.length ? `（${bonuses.join('、')}）` : ''}`,
+  const reels = [
+    '╔═══════════╗',
+    `　${formatReels(state.lastSpin.reels)}`,
+    '╚═══════════╝',
   ].join('\n');
-}
-
-function lastResolutionText(state) {
-  const result = state.lastResolution;
-  if (!result) return null;
-  const discarded = [];
-  if (result.discardedAction) discarded.push(`行動 ${result.discardedAction}`);
-  if (result.discardedMana) discarded.push(`法力 ${result.discardedMana}`);
-  const statusEffects = [
-    ...(result.enemyStatusEvents ?? result.bossStatusEvents ?? []),
-    ...(result.playerStatusEvents ?? []),
-  ].map(statusEventText).filter(Boolean);
-  return [
-    `第 ${result.round} 回合：${result.enemyAction?.name ?? '敵人攻擊'} **${result.enemyAttack ?? result.bossAttack}**，護甲抵擋 **${result.armorUsed}**，受到 **${result.damageTaken}** 傷害。`,
-    discarded.length ? `未使用的${discarded.join('、')}已消失。` : null,
-    statusEffects.length ? `狀態效果：${statusEffects.join('、')}` : null,
-  ].filter(Boolean).join('\n');
+  if (state.lastSpin.stunned) {
+    return `${reels}\n拉霸結果：進入暈眩狀態`;
+  }
+  const impact = state.lastImpact ?? {};
+  const results = [];
+  if (impact.attackDamage > 0) results.push(`造成 ${impact.attackDamage} 傷害`);
+  if (impact.armorGained > 0) results.push(`護甲 +${impact.armorGained}`);
+  if (impact.manaGained > 0) results.push(`法力 +${impact.manaGained}`);
+  return `${reels}\n拉霸結果：${results.join('／') || '沒有產生效果'}`;
 }
 
 function statusListText(statuses) {
@@ -529,13 +476,6 @@ function rewardDescription(choice, content) {
 function rewardName(choice, content) {
   if (choice.contentType !== 'skill') return content.name;
   return `${content.name} Lv.${choice.targetLevel ?? 1}`;
-}
-
-function statusEventText(event) {
-  const status = getStatus(event.statusId);
-  if (event.type === 'damage') return `${status.emoji}${status.name}造成 ${event.amount} 傷害`;
-  if (event.type === 'heal') return `${status.emoji}${status.name}回復 ${event.amount} HP`;
-  return null;
 }
 
 function itemTypeLabel(item) {
