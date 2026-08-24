@@ -46,41 +46,41 @@ export function rollRewardChoices(
   const choices = [];
 
   for (let roll = 0; roll < table.choices; roll += 1) {
-  const rolledRarity = rollContentRarity(
-    table.rarityWeights,
-    rarityModifiers,
-    rng,
-  );
+    const rolledRarity = rollContentRarity(
+      table.rarityWeights,
+      rarityModifiers,
+      rng,
+    );
 
-  let selectedPool = [];
-  let selectedRarity = rolledRarity;
+    let selectedPool = [];
+    let selectedRarity = rolledRarity;
 
-  for (const rarity of RARITY_FALLBACKS[rolledRarity]) {
-    selectedPool = rewardPool(rarity, regionTags, player)
-      .filter((entry) => !choices.some((choice) => (
-        choice.contentType === entry.contentType
-        && choice.contentId === entry.contentId
-      )));
+    for (const rarity of RARITY_FALLBACKS[rolledRarity]) {
+      selectedPool = rewardPool(rarity, regionTags, player)
+        .filter((entry) => !choices.some((choice) => (
+          choice.contentType === entry.contentType
+          && choice.contentId === entry.contentId
+        )));
 
-    if (selectedPool.length > 0) {
-      selectedRarity = rarity;
-      break;
+      if (selectedPool.length > 0) {
+        selectedRarity = rarity;
+        break;
+      }
     }
+
+    if (selectedPool.length === 0) break;
+
+    const selected = pickWeighted(
+      selectedPool,
+      rng,
+      (entry) => entry.lootWeight,
+    );
+
+    choices.push({
+      ...selected,
+      rarity: selectedRarity,
+    });
   }
-
-  if (selectedPool.length === 0) break;
-
-  const selected = pickWeighted(
-    selectedPool,
-    rng,
-    (entry) => entry.lootWeight,
-  );
-
-  choices.push({
-    ...selected,
-    rarity: selectedRarity,
-  });
-}
 
   return choices;
 }
