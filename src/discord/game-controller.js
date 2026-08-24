@@ -125,6 +125,12 @@ export function createGameController({
           return handledResult(renderContentDetail(session.state, contentType, value));
         }
 
+        if (action === 'detail-equipment') {
+          const itemId = values[0];
+          if (!itemId) throw new Error('沒有收到裝備選擇');
+          return handledResult(renderContentDetail(session.state, 'item', itemId));
+        }
+
         if (action === 'detail-close') {
           return handledResult(renderGame(session.state));
         }

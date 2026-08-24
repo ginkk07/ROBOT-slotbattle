@@ -1,7 +1,12 @@
 import { ACHIEVEMENTS } from '../game/data/achievements.js';
+import { contentTypeEmoji } from '../game/data/content-types.js';
 import { getItem } from '../game/data/items.js';
 import { rarityLabel } from '../game/data/rarities.js';
-import { getSkill, getSkillLevelDefinition } from '../game/data/skills.js';
+import {
+  getSkill,
+  getSkillLevelDefinition,
+  skillUsageLabel,
+} from '../game/data/skills.js';
 import { getStatus } from '../game/data/statuses.js';
 import {
   GamePhase,
@@ -63,7 +68,7 @@ export function renderProfile(profileRecord) {
         name: '目前技能',
         value: selectedSkills.length
           ? selectedSkills.map((skill) => (
-            `${skill.emoji} **${skill.name}**｜${skill.cost} 法力\n${skill.description}`
+            `${contentTypeEmoji('skill')} **${skill.name}**｜${skillUsageLabel(skill)}\n${skill.description}`
           )).join('\n')
           : '尚未選擇',
         inline: false,
@@ -72,7 +77,7 @@ export function renderProfile(profileRecord) {
         name: '目前道具',
         value: selectedItems.length
           ? selectedItems.map((item) => (
-            `${item.emoji} **${item.name}**｜${itemTypeLabel(item)}\n${item.description}`
+            `${contentTypeEmoji(item.type)} **${item.name}**｜${itemTypeLabel(item)}\n${item.description}`
           )).join('\n')
           : '尚未選擇',
         inline: false,
@@ -218,7 +223,9 @@ function renderRewardChoice(state) {
       actionRow(state.rewardChoices.map((choice, index) => button({
         customId: gameCustomId(state.id, 'reward', String(index)),
         label: `${index + 1}. ${rewardName(choice, rewardContent(choice))}`,
-        emoji: rewardContent(choice).emoji,
+        emoji: contentTypeEmoji(
+          choice.contentType === 'skill' ? 'skill' : rewardContent(choice).type,
+        ),
         style: BUTTON_STYLE.SUCCESS,
       }))),
       actionRow([abandonButton(state.id)]),
@@ -326,32 +333,28 @@ function combatControls(state) {
     actionButtons.push(button({
       customId: gameCustomId(state.id, 'detail-skill', skill.id),
       label: `${skill.name} Lv.${skillLevel}`,
-      emoji: skill.emoji,
+      emoji: contentTypeEmoji('skill'),
       style: BUTTON_STYLE.SECONDARY,
     }));
   }
 
-  for (const itemId of Object.values(state.player.equipment ?? {})) {
-    const item = getItem(itemId);
-    actionButtons.push(button({
-      customId: gameCustomId(state.id, 'detail-item', item.id),
-      label: item.name,
-      emoji: item.emoji,
-      style: BUTTON_STYLE.SECONDARY,
-    }));
-  }
   for (const { itemId, quantity } of state.player.inventory ?? []) {
     const item = getItem(itemId);
     if (quantity < 1) continue;
     actionButtons.push(button({
       customId: gameCustomId(state.id, 'detail-item', item.id),
       label: `${item.name} ×${quantity}`,
-      emoji: item.emoji,
+      emoji: contentTypeEmoji('consumable'),
       style: BUTTON_STYLE.SECONDARY,
     }));
   }
 
-  const rows = chunk(actionButtons, 5).slice(0, 4).map(actionRow);
+  const equipmentIds = Object.values(state.player.equipment ?? {});
+  const maximumActionRows = equipmentIds.length > 0 ? 3 : 4;
+  const rows = chunk(actionButtons, 5).slice(0, maximumActionRows).map(actionRow);
+  if (equipmentIds.length > 0) {
+    rows.push(actionRow([equipmentSelect(state, equipmentIds)]));
+  }
   rows.push(actionRow([
     button({
       customId: gameCustomId(state.id, 'end'),
@@ -362,6 +365,25 @@ function combatControls(state) {
     abandonButton(state.id),
   ]));
   return rows;
+}
+
+function equipmentSelect(state, equipmentIds) {
+  return {
+    type: COMPONENT_TYPE.STRING_SELECT,
+    custom_id: gameCustomId(state.id, 'detail-equipment'),
+    placeholder: `查看裝備（${equipmentIds.length}）`,
+    min_values: 1,
+    max_values: 1,
+    options: equipmentIds.slice(0, 25).map((itemId) => {
+      const item = getItem(itemId);
+      return {
+        label: item.name,
+        value: item.id,
+        description: `${rarityLabel(item.rarity)}｜${item.description}`.slice(0, 100),
+        emoji: { name: contentTypeEmoji('equipment') },
+      };
+    }),
+  };
 }
 
 function combatDescription(state) {
@@ -391,8 +413,8 @@ function skillSelect(profile, selectedIds) {
       return {
         label: skill.name,
         value: id,
-        description: `${skill.cost} 法力｜${skill.description}`.slice(0, 100),
-        emoji: { name: skill.emoji },
+        description: `${skillUsageLabel(skill)}｜${skill.description}`.slice(0, 100),
+        emoji: { name: contentTypeEmoji('skill') },
         default: selectedIds.includes(id),
       };
     }),
@@ -412,7 +434,7 @@ function itemSelect(profile, selectedIds) {
         label: item.name,
         value: id,
         description: `${itemTypeLabel(item)}｜${item.description}`.slice(0, 100),
-        emoji: { name: item.emoji },
+        emoji: { name: contentTypeEmoji(item.type) },
         default: selectedIds.includes(id),
       };
     }),
@@ -468,7 +490,7 @@ function rewardDescription(choice, content) {
     const acquisition = choice.acquisition === 'level-up'
       ? `技能升級｜Lv.${choice.currentLevel} → Lv.${choice.targetLevel}`
       : `新技能｜Lv.${choice.targetLevel ?? 1}`;
-    return `${acquisition}｜法力消耗 ${content.cost}\n${definition.description}`;
+    return `${acquisition}｜${skillUsageLabel(content)}\n${definition.description}`;
   }
   return `${itemTypeLabel(content)}\n${content.description}`;
 }
@@ -479,7 +501,7 @@ function rewardName(choice, content) {
 }
 
 function itemTypeLabel(item) {
-  if (item.type === 'equipment') return '裝備（戰鬥開始時自動生效）';
+  if (item.type === 'equipment') return '裝備（持有時自動生效）';
   return '消耗品（戰鬥中使用）';
 }
 

@@ -102,7 +102,7 @@ test('三個戰鬥獎勵選項會各自獨立抽取稀有度', () => {
   assert.equal(choices.length, 3);
 });
 
-test('Boss傳說候選不足時會依序向其他稀有度補滿且不重複', () => {
+test('Boss可從新增的傳說技能與裝備中抽出三個不重複獎勵', () => {
   const choices = rollRewardChoices('ruins-boss-loot', {
     regionTags: ['ruins'],
     rng: sequence([0, 0, 0.5, 0.5, 0.9, 0.9]),
@@ -111,9 +111,10 @@ test('Boss傳說候選不足時會依序向其他稀有度補滿且不重複', (
   assert.equal(choices.length, 3);
   assert.deepEqual(
     choices.map((choice) => choice.rarity),
-    ['legendary', 'legendary', 'rare'],
+    ['legendary', 'legendary', 'legendary'],
   );
   assert.equal(new Set(choices.map((choice) => choice.contentId)).size, 3);
+  assert.equal(choices.some((choice) => choice.contentType === 'item'), true);
 });
 
 test('持有但未滿等的技能可再次出現並升級，滿等後會排除', () => {

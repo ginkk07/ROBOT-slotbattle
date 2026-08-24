@@ -44,11 +44,11 @@ test('可依Discord玩家ID找回進行中的戰鬥與永久資料', async () =>
     'fire-imbue',
   ]);
   assert.deepEqual(profile.profile.unlockedStartingItemIds, [
-    'healing-potion',
-    'fire-bomb',
-    'flame-sword',
+    'sword',
+    'lucky-clover',
+    'shuriken',
   ]);
-  assert.deepEqual(profile.profile.lastStartingLoadout.itemIds, ['healing-potion']);
+  assert.deepEqual(profile.profile.lastStartingLoadout.itemIds, ['sword']);
 
   await assert.rejects(
     store.createSession(createGame({ id: 'duplicate', ownerId: 'player-1' })),

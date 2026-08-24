@@ -1,5 +1,9 @@
 import { createCatalog, requireDefinition } from './catalog.js';
 import { ContentRarity } from './rarities.js';
+import {
+  PassiveSkillEffectType,
+  SkillActivation,
+} from './skill-effects.js';
 
 export const SKILLS = createCatalog([
   {
@@ -7,6 +11,7 @@ export const SKILLS = createCatalog([
     name: '治癒',
     emoji: '💚',
     rarity: ContentRarity.COMMON,
+    activation: SkillActivation.ACTIVE,
     lootEligible: true,
     lootWeight: 100,
     lootTags: ['ruins'],
@@ -35,6 +40,7 @@ export const SKILLS = createCatalog([
     name: '強擊',
     emoji: '💥',
     rarity: ContentRarity.COMMON,
+    activation: SkillActivation.ACTIVE,
     lootEligible: true,
     lootWeight: 100,
     lootTags: ['ruins'],
@@ -87,6 +93,7 @@ export const SKILLS = createCatalog([
     name: '火焰附加',
     emoji: '🔥',
     rarity: ContentRarity.RARE,
+    activation: SkillActivation.ACTIVE,
     lootEligible: true,
     lootWeight: 100,
     lootTags: ['ruins'],
@@ -139,10 +146,49 @@ export const SKILLS = createCatalog([
     ],
   },
   {
+    id: 'mana-armor',
+    name: '魔力護甲',
+    emoji: '✨',
+    rarity: ContentRarity.RARE,
+    activation: SkillActivation.PASSIVE,
+    lootEligible: true,
+    lootWeight: 100,
+    lootTags: ['ruins'],
+    description: '受到傷害時，每消耗1點✨可抵擋1點傷害。',
+    passiveEffects: [{
+      type: PassiveSkillEffectType.MANA_ARMOR,
+      damagePerMana: 1,
+    }],
+    levels: [
+      {
+        description: '受到傷害時，每消耗1點✨可抵擋1點傷害。',
+        passiveEffects: [{
+          type: PassiveSkillEffectType.MANA_ARMOR,
+          damagePerMana: 1,
+        }],
+      },
+      {
+        description: '受到傷害時，每消耗1點✨可抵擋2點傷害。',
+        passiveEffects: [{
+          type: PassiveSkillEffectType.MANA_ARMOR,
+          damagePerMana: 2,
+        }],
+      },
+      {
+        description: '受到傷害時，每消耗1點✨可抵擋3點傷害。',
+        passiveEffects: [{
+          type: PassiveSkillEffectType.MANA_ARMOR,
+          damagePerMana: 3,
+        }],
+      },
+    ],
+  },
+  {
     id: 'flame-impact',
     name: '火焰衝擊',
     emoji: '🔥',
     rarity: ContentRarity.LEGENDARY,
+    activation: SkillActivation.ACTIVE,
     lootEligible: true,
     lootWeight: 100,
     lootTags: ['ruins'],
@@ -220,9 +266,25 @@ export function getSkillLevelDefinition(skillId, level = 1) {
   const skill = getSkill(skillId);
   const definitions = skill.levels?.length
     ? skill.levels
-    : [{ description: skill.description, effects: skill.effects }];
+    : [{
+      description: skill.description,
+      effects: skill.effects ?? [],
+      passiveEffects: skill.passiveEffects ?? [],
+    }];
   if (!Number.isInteger(level) || level < 1 || level > definitions.length) {
     throw new RangeError(`${skill.name}沒有 Lv.${level} 的資料`);
   }
   return definitions[level - 1];
+}
+
+export function skillActivation(skillOrId) {
+  const skill = typeof skillOrId === 'string' ? getSkill(skillOrId) : skillOrId;
+  return skill.activation ?? SkillActivation.ACTIVE;
+}
+
+export function skillUsageLabel(skillOrId) {
+  const skill = typeof skillOrId === 'string' ? getSkill(skillOrId) : skillOrId;
+  return skillActivation(skill) === SkillActivation.PASSIVE
+    ? '被動技能'
+    : `${skill.cost} 法力`;
 }

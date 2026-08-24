@@ -1,5 +1,10 @@
 import { getItem } from '../data/items.js';
-import { getSkill, getSkillLevelDefinition } from '../data/skills.js';
+import { SkillActivation } from '../data/skill-effects.js';
+import {
+  getSkill,
+  getSkillLevelDefinition,
+  skillActivation,
+} from '../data/skills.js';
 import { getStatus } from '../data/statuses.js';
 import { playerSkillLevel } from './skill-progression.js';
 
@@ -14,6 +19,9 @@ export function skillActionAvailability(state, skillId) {
   const level = playerSkillLevel(state.player, skillId);
 
   if (level < 1) return blocked('這個技能不在目前持有的技能中');
+  if (skillActivation(skill) === SkillActivation.PASSIVE) {
+    return blocked('被動技能會自動生效');
+  }
   const phaseReason = playerActionBlockReason(state);
   if (phaseReason) return blocked(phaseReason);
   if (state.resources.mana < skill.cost) {
@@ -34,7 +42,7 @@ export function skillActionAvailability(state, skillId) {
 export function itemActionAvailability(state, itemId) {
   const item = getItem(itemId);
   if (item.type !== 'consumable') {
-    return blocked('裝備會在戰鬥開始時自動生效');
+    return blocked('裝備持有時會自動生效');
   }
 
   const stack = state.player.inventory?.find((entry) => entry.itemId === itemId);

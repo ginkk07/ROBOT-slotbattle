@@ -7,6 +7,7 @@ import { getMonsterActionRule } from '../src/game/data/monster-actions.js';
 import { getMonsterSkill } from '../src/game/data/monster-skills.js';
 import { PLAYER_PROGRESSION_RULES } from '../src/game/data/player-progression.js';
 import { getRegion } from '../src/game/data/regions.js';
+import { SkillActivation } from '../src/game/data/skill-effects.js';
 import { getSkill, getSkillLevelDefinition } from '../src/game/data/skills.js';
 import { getStatus } from '../src/game/data/statuses.js';
 import { getUnit } from '../src/game/data/units.js';
@@ -66,11 +67,26 @@ test('玩家技能與道具共用effects，怪物技能使用獨立資料庫', (
   );
   assert.match(getSkillLevelDefinition('flame-impact', 3).description, /5 層燃燒/);
   assert.equal(getItem('healing-potion').actionCost, 0);
+  assert.equal(getItem('sword').type, 'equipment');
+  assert.equal(
+    getItem('sword').equipmentEffects[0].effects[0].statusId,
+    'attack-up',
+  );
   assert.equal(getItem('flame-sword').type, 'equipment');
-  assert.equal(getItem('flame-sword').battleStartEffects[0].statusId, 'attack-up');
+  assert.equal(getItem('flame-sword').rarity, 'legendary');
   assert.equal(getSkill('life-recovery').rarity, 'common');
   assert.equal(getSkill('flame-impact').rarity, 'legendary');
   assert.equal(getItem('fire-bomb').rarity, 'rare');
+  assert.equal(getSkill('mana-armor').rarity, 'rare');
+  assert.equal(getSkill('mana-armor').activation, SkillActivation.PASSIVE);
+  assert.deepEqual(
+    [1, 2, 3].map((level) => (
+      getSkillLevelDefinition('mana-armor', level)
+        .passiveEffects[0].damagePerMana
+    )),
+    [1, 2, 3],
+  );
+  assert.equal(getItem('cursed-snake-scale').type, 'equipment');
   assert.equal(getMonsterSkill('guardian-strike').power, 1.25);
   assert.equal(getStatus('attack-up').stacking.mode, 'stack-potency');
   assert.equal(getStatus('burning').trigger, 'turn-start');
@@ -99,6 +115,10 @@ test('可調整的全域平衡規則集中在資料層', () => {
   assert.equal(region.scaling.baseDamagePerDepth, 0.2);
   assert.equal(PLAYER_PROGRESSION_RULES.startingSkillSlots, 1);
   assert.equal(PLAYER_PROGRESSION_RULES.startingItemSlots, 1);
+  assert.deepEqual(
+    PLAYER_PROGRESSION_RULES.defaultUnlockedStartingItemIds,
+    ['sword', 'lucky-clover', 'shuriken'],
+  );
   assert.equal(PLAYER_PROGRESSION_RULES.maxHeldSkills, 3);
   assert.equal(PLAYER_PROGRESSION_RULES.maxSkillLevel, 3);
 });
