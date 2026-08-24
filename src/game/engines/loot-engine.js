@@ -5,6 +5,34 @@ import { SKILLS } from '../data/skills.js';
 import { skillRewardEligibility } from './skill-progression.js';
 import { pickWeighted } from './weighted-random.js';
 
+/**
+ * 獎勵候選不足時的稀有度補位順序。
+ *
+ * 例如：
+ * - BOSS 原本只抽傳說，傳說內容不足時依序用稀有、普通補滿。
+ * - 普通獎勵不足時依序使用稀有、傳說補滿。
+ *
+ * 每組第一個稀有度必須是原始稀有度。
+ * 調整補位規則時，只需要修改這裡，不必更動抽選引擎。
+ */
+const RARITY_FALLBACKS = {
+  [ContentRarity.COMMON]: [
+    ContentRarity.COMMON,
+    ContentRarity.RARE,
+    ContentRarity.LEGENDARY,
+  ],
+  [ContentRarity.RARE]: [
+    ContentRarity.RARE,
+    ContentRarity.COMMON,
+    ContentRarity.LEGENDARY,
+  ],
+  [ContentRarity.LEGENDARY]: [
+    ContentRarity.LEGENDARY,
+    ContentRarity.RARE,
+    ContentRarity.COMMON,
+  ],
+};
+
 export function rollRewardChoices(
   lootTableId,
   {
