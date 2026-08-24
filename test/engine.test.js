@@ -400,7 +400,7 @@ test('擊敗怪物後先等待玩家確認，再進入獨立獎勵選擇', () =>
 
   state = confirmCombatVictory(state, { rewardRng: zero });
   assert.equal(state.phase, GamePhase.REWARD_CHOICE);
-  assert.equal(state.rewardChoices.length, 2);
+  assert.equal(state.rewardChoices.length, 3);
   assert.equal(state.adventure.defeatedUnitCount, 1);
 });
 
