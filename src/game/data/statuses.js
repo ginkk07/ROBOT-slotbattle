@@ -115,6 +115,19 @@ export const STATUSES = createCatalog([
     bossRule: { mode: BossRuleMode.NORMAL },
   },
   {
+    // 與「劍」的攻擊力＋1分開保存，避免兩種不同持續時間互相覆蓋。
+    id: 'bounty-attack-up',
+    name: '攻擊力＋3',
+    emoji: '💪',
+    polarity: StatusPolarity.BUFF,
+    category: 'stat-modifier',
+    trigger: 'passive',
+    defaultDuration: 1,
+    stacking: { mode: 'refresh-duration', maxStacks: 1 },
+    effect: { type: 'modify-stat', stat: 'attack', amountPerPotency: 3 },
+    bossRule: { mode: BossRuleMode.NORMAL },
+  },
+  {
     id: 'regeneration',
     name: '再生',
     emoji: '🌿',

@@ -34,7 +34,7 @@ export function skillActionAvailability(state, skillId) {
 export function itemActionAvailability(state, itemId) {
   const item = getItem(itemId);
   if (item.type !== 'consumable') {
-    return blocked('裝備會在戰鬥開始時自動生效');
+    return blocked('裝備持有時會自動生效');
   }
 
   const stack = state.player.inventory?.find((entry) => entry.itemId === itemId);

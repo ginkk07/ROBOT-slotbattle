@@ -23,7 +23,10 @@ export function createAdventureProgress(regionId = 'ruins') {
   };
 }
 
-export function drawNextAdventureNode(progress, { rng = Math.random } = {}) {
+export function drawNextAdventureNode(
+  progress,
+  { rng = Math.random, minimumEliteChance = 0 } = {},
+) {
   const region = getRegion(progress.regionId);
   const bossChance = bossEncounterChance(progress, region);
 
@@ -55,9 +58,12 @@ export function drawNextAdventureNode(progress, { rng = Math.random } = {}) {
     };
   }
 
-  const eliteChance = clampProbability(
-    region.encounterRules.elite.baseChance
-      + Number(progress.modifiers?.eliteChanceBonus ?? 0),
+  const eliteChance = Math.max(
+    clampProbability(minimumEliteChance),
+    clampProbability(
+      region.encounterRules.elite.baseChance
+        + Number(progress.modifiers?.eliteChanceBonus ?? 0),
+    ),
   );
   const elite = probabilityRoll(rng) < eliteChance;
   const tableId = elite

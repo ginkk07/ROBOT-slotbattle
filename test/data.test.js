@@ -66,8 +66,13 @@ test('玩家技能與道具共用effects，怪物技能使用獨立資料庫', (
   );
   assert.match(getSkillLevelDefinition('flame-impact', 3).description, /5 層燃燒/);
   assert.equal(getItem('healing-potion').actionCost, 0);
+  assert.equal(getItem('sword').type, 'equipment');
+  assert.equal(
+    getItem('sword').equipmentEffects[0].effects[0].statusId,
+    'attack-up',
+  );
   assert.equal(getItem('flame-sword').type, 'equipment');
-  assert.equal(getItem('flame-sword').battleStartEffects[0].statusId, 'attack-up');
+  assert.equal(getItem('flame-sword').rarity, 'legendary');
   assert.equal(getSkill('life-recovery').rarity, 'common');
   assert.equal(getSkill('flame-impact').rarity, 'legendary');
   assert.equal(getItem('fire-bomb').rarity, 'rare');

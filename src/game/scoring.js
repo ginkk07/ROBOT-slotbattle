@@ -15,7 +15,7 @@ export function countSymbols(reels) {
   );
 }
 
-export function scoreSpin(reels, wager) {
+export function scoreSpin(reels, wager, { promoteWithLucky = false } = {}) {
   if (!Number.isInteger(wager) || wager < 1) {
     throw new RangeError('投入的行動點必須是大於0的整數');
   }
@@ -35,10 +35,18 @@ export function scoreSpin(reels, wager) {
   }
 
   const luckyValue = COMBO_VALUE[counts[SymbolId.LUCKY]];
+  const comboValue = (symbolId) => {
+    const count = counts[symbolId];
+    // 幸運蘿蔔只提升實際出現的⚔️／🛡️／✨，🍀原有效果另外保留。
+    const promotedCount = promoteWithLucky && count > 0
+      ? Math.min(3, count + counts[SymbolId.LUCKY])
+      : count;
+    return COMBO_VALUE[promotedCount];
+  };
   const base = {
-    attack: COMBO_VALUE[counts[SymbolId.ATTACK]] + luckyValue,
-    defense: COMBO_VALUE[counts[SymbolId.DEFENSE]] + luckyValue,
-    skill: COMBO_VALUE[counts[SymbolId.SKILL]] + luckyValue,
+    attack: comboValue(SymbolId.ATTACK) + luckyValue,
+    defense: comboValue(SymbolId.DEFENSE) + luckyValue,
+    skill: comboValue(SymbolId.SKILL) + luckyValue,
   };
 
   return {

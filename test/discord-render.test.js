@@ -46,6 +46,14 @@ test('玩家資料頁可各選一個開局技能與道具', () => {
   assert.equal(payload.components[1].components[0].options.length, 3);
   assert.equal(payload.components[0].components[0].max_values, 1);
   assert.equal(payload.components[1].components[0].max_values, 1);
+  assert.deepEqual(
+    payload.components[0].components[0].options.map((option) => option.emoji.name),
+    ['📘', '📘', '📘'],
+  );
+  assert.deepEqual(
+    payload.components[1].components[0].options.map((option) => option.emoji.name),
+    ['🧪', '🧪', '🎒'],
+  );
 });
 
 test('戰鬥面板使用自由投入、技能、道具與回合結束按鈕', () => {
@@ -90,18 +98,22 @@ test('裝備在面板顯示為已穿戴而不是使用按鈕', () => {
     ownerId: 'player-1',
     loadout: {
       skillIds: ['life-recovery'],
-      itemIds: ['flame-sword'],
+      itemIds: ['sword'],
     },
   });
   const payload = renderGame(state);
   const player = payload.embeds[0].fields.find((field) => field.name.startsWith('👤'));
-  const labels = payload.components.flatMap((row) => (
-    row.components.map((component) => component.label)
-  ));
+  const equipmentSelect = payload.components
+    .flatMap((row) => row.components)
+    .find((component) => component.custom_id === (
+      'slotbattle:equipment-render-test:detail-equipment'
+    ));
 
   assert.match(player.value, /玩家狀態[\s\S]*攻擊力＋1（3回合）/);
-  assert.ok(labels.includes('燃焰之劍'));
-  assert.doesNotMatch(labels.join('、'), /使用燃焰之劍/);
+  assert.deepEqual(
+    equipmentSelect.options.map((option) => [option.label, option.emoji.name]),
+    [['劍', '🎒']],
+  );
 });
 
 test('回合資源只使用符號與數值顯示', () => {
@@ -163,9 +175,9 @@ test('裝備詳情只顯示關閉，消耗品可用時顯示使用', () => {
   const equipmentState = createGame({
     id: 'equipment-detail-test',
     ownerId: 'player-1',
-    loadout: { skillIds: ['power-strike'], itemIds: ['flame-sword'] },
+    loadout: { skillIds: ['power-strike'], itemIds: ['sword'] },
   });
-  const equipment = renderContentDetail(equipmentState, 'item', 'flame-sword');
+  const equipment = renderContentDetail(equipmentState, 'item', 'sword');
   assert.deepEqual(
     equipment.components[0].components.map((component) => component.label),
     ['關閉'],
@@ -265,7 +277,7 @@ test('遊戲結束畫面顯示擊敗數量與最後技能道具配置', () => {
     config: { initialEnemyUnitId: 'ruins-sentinel' },
     loadout: {
       skillIds: ['power-strike'],
-      itemIds: ['flame-sword'],
+      itemIds: ['sword'],
     },
     monsterRng: () => 0,
   }));
@@ -275,7 +287,7 @@ test('遊戲結束畫面顯示擊敗數量與最後技能道具配置', () => {
   )));
 
   assert.equal(payload.embeds[0].title, '冒險結束');
-  assert.match(fields['最後裝備配置'], /燃焰之劍/);
+  assert.match(fields['最後裝備配置'], /劍/);
   assert.match(fields['最後技能配置'], /強擊/);
   assert.equal(payload.components[0].components[0].label, '開始新遊戲');
 });

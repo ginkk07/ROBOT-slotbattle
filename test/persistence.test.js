@@ -46,7 +46,7 @@ test('可依Discord玩家ID找回進行中的戰鬥與永久資料', async () =>
   assert.deepEqual(profile.profile.unlockedStartingItemIds, [
     'healing-potion',
     'fire-bomb',
-    'flame-sword',
+    'sword',
   ]);
   assert.deepEqual(profile.profile.lastStartingLoadout.itemIds, ['healing-potion']);
 

@@ -2,7 +2,7 @@ import { ITEMS } from '../game/data/items.js';
 import { PLAYER_PROGRESSION_RULES } from '../game/data/player-progression.js';
 import { SKILLS } from '../game/data/skills.js';
 
-export const PLAYER_SAVE_VERSION = 3;
+export const PLAYER_SAVE_VERSION = 4;
 
 export const STARTING_SKILL_IDS = (
   PLAYER_PROGRESSION_RULES.defaultUnlockedStartingSkillIds
@@ -45,6 +45,17 @@ export function upgradePlayerProfile(value, playerId = value?.playerId) {
   if (!playerId) throw new TypeError('更新玩家資料需要 playerId');
 
   const source = value ? structuredClone(value) : {};
+  if (Number(source.saveVersion ?? 0) < PLAYER_SAVE_VERSION) {
+    // 舊版同名「燃焰之劍」是現在的普通「劍」，不可直接升成傳說裝備。
+    source.unlockedStartingItemIds = replaceLegacyStarterSword(
+      source.unlockedStartingItemIds,
+    );
+    if (source.lastStartingLoadout) {
+      source.lastStartingLoadout.itemIds = replaceLegacyStarterSword(
+        source.lastStartingLoadout.itemIds,
+      );
+    }
+  }
   const unlockedSkills = uniqueKnownIds(
     source.unlockedStartingSkillIds,
     Object.keys(SKILLS),
@@ -112,4 +123,11 @@ function uniqueStrings(values) {
 function nonNegativeInteger(value) {
   const number = Number(value ?? 0);
   return Number.isInteger(number) && number >= 0 ? number : 0;
+}
+
+function replaceLegacyStarterSword(itemIds) {
+  if (!Array.isArray(itemIds)) return itemIds;
+  return itemIds.map((itemId) => (
+    itemId === 'flame-sword' ? 'sword' : itemId
+  ));
 }

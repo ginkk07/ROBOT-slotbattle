@@ -1,3 +1,4 @@
+import { contentTypeEmoji, contentTypeMeta } from '../game/data/content-types.js';
 import { getItem } from '../game/data/items.js';
 import { rarityLabel } from '../game/data/rarities.js';
 import { getSkill, getSkillLevelDefinition } from '../game/data/skills.js';
@@ -5,6 +6,7 @@ import {
   itemActionAvailability,
   skillActionAvailability,
 } from '../game/engines/action-availability.js';
+import { equippedItemIds } from '../game/engines/equipment-engine.js';
 import { playerSkillLevel } from '../game/engines/skill-progression.js';
 
 const COMPONENT_TYPE = Object.freeze({ ACTION_ROW: 1, BUTTON: 2 });
@@ -32,7 +34,7 @@ function renderSkillDetail(state, skillId) {
   const availability = skillActionAvailability(state, skillId);
   return detailPayload({
     state,
-    title: `${skill.name} Lv.${level}`,
+    title: `${contentTypeEmoji('skill')} ${skill.name} Lv.${level}`,
     fields: [
       { name: '稀有度', value: rarityLabel(skill.rarity), inline: true },
       { name: '法力消耗', value: String(skill.cost), inline: true },
@@ -46,7 +48,7 @@ function renderSkillDetail(state, skillId) {
 
 function renderItemDetail(state, itemId) {
   const item = getItem(itemId);
-  const equipped = Object.values(state.player.equipment ?? {}).includes(itemId);
+  const equipped = equippedItemIds(state.player).includes(itemId);
   const stack = state.player.inventory?.find((entry) => entry.itemId === itemId);
   if (!equipped && (!stack || stack.quantity < 1)) {
     throw new Error('這個道具不在目前持有的道具中');
@@ -56,9 +58,9 @@ function renderItemDetail(state, itemId) {
   const holding = equipped ? '已裝備' : `持有 ${stack.quantity} 個`;
   return detailPayload({
     state,
-    title: item.name,
+    title: `${contentTypeEmoji(item.type)} ${item.name}`,
     fields: [
-      { name: '分類', value: item.type === 'equipment' ? '裝備' : '消耗品', inline: true },
+      { name: '分類', value: contentTypeMeta(item.type).label, inline: true },
       { name: '稀有度', value: rarityLabel(item.rarity), inline: true },
       { name: '目前持有', value: holding, inline: true },
       { name: '效果', value: item.description, inline: false },

@@ -11,7 +11,7 @@ export const PLAYER_PROGRESSION_RULES = deepFreeze({
   defaultUnlockedStartingItemIds: [
     'healing-potion',
     'fire-bomb',
-    'flame-sword',
+    'sword',
   ],
   startingSkillSlots: 1,
   startingItemSlots: 1,

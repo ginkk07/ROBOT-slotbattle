@@ -10,6 +10,8 @@
 | 怪物技能、傷害倍率、技能效果 | `src/game/data/monster-skills.js` |
 | 普通／菁英／Boss 的普通攻擊率與技能數 | `src/game/data/monster-actions.js` |
 | 道具、裝備、行動點成本、稀有度 | `src/game/data/items.js` |
+| 裝備觸發時機與共用效果類型 | `src/game/data/item-effects.js` |
+| 技能／裝備／消耗品的分類 ICON | `src/game/data/content-types.js` |
 | 燃燒、攻擊力加成等狀態及疊加方式 | `src/game/data/statuses.js` |
 | 怪物生命、基礎傷害、持有技能、掉落表 | `src/game/data/units.js` |
 | 地區的 Boss／奇遇／菁英機率與能力成長 | `src/game/data/regions.js` |
@@ -42,6 +44,7 @@
 - `status-engine.js`：狀態成功率、抗性與疊加規則。
 - `skill-progression.js`：技能持有上限、等級正規化、升級與遺忘。
 - `action-availability.js`：戰鬥面板與詳情卡共用的技能／道具可用性判定。
+- `equipment-engine.js`：正規化多件裝備、查詢觸發效果與計算裝備加成。
 - 引擎不得另存一份相同機率或內容數值；需要數值時一律讀取資料層。
 
 ### `src/game/engine.js`
@@ -83,10 +86,22 @@
 ### 新增道具或裝備
 
 1. 在 `items.js` 設定類型、稀有度、效果及 `actionCost`。
-2. 裝備使用 `battleStartEffects`；消耗品使用 `effects`。
-3. 需要的新狀態先加入 `statuses.js`。
-4. 設定預設解鎖或成就解鎖來源。
-5. 補效果與戰鬥測試。
+2. 裝備使用 `equipmentEffects`，每個效果由 `trigger` 與 `type` 組合；既有值集中在 `item-effects.js`。
+3. 消耗品若是傷害、治療或狀態，使用 `effects`；若是加護甲／法力或設定下一次牌面機率，使用 `combatEffects`。
+4. 需要的新狀態先加入 `statuses.js`。只有現有通用效果無法表達時，才擴充 `equipment-engine.js` 與戰鬥引擎的共用效果類型，禁止依道具 ID 判斷。
+5. 所有裝備 ID 保存於 `player.equipment` 陣列，會同時生效；不要再新增裝備部位或覆蓋其他裝備。
+6. 設定預設解鎖或成就解鎖來源，並補效果、存檔升級與戰鬥測試。
+
+常用觸發時機：
+
+- `battle-start`：戰鬥開始。
+- `player-turn-start`／`player-turn-end`：玩家回合開始／結束。
+- `symbol-roll`：調整拉霸牌面機率。
+- `spin-damage`／`after-spin`：計算拉霸傷害或牌面結算後。
+- `heal`／`damage-taken`：實際治療或護甲抵擋後受傷。
+- `encounter-roll`：抽取下一個遭遇。
+
+磨刀石這類一次性牌面效果保存在 `combatModifiers.nextSpinSymbolChances`，拉霸抽牌後必須立即清除；進入新戰鬥時也會重設。介面 ICON 只分技能、裝備、消耗品，統一修改 `content-types.js`，不要在單一道具加入新 ICON。
 
 ### 修改技能／道具詳情卡
 

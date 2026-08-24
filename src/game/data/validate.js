@@ -3,6 +3,7 @@ import { ENCOUNTER_TABLES } from './encounters.js';
 import { EVENT_RULES } from './event-rules.js';
 import { EVENTS } from './events.js';
 import { ITEMS } from './items.js';
+import { ITEM_EFFECT_TRIGGERS, ITEM_EFFECT_TYPES } from './item-effects.js';
 import { LOOT_TABLES } from './loot-tables.js';
 import { MONSTER_ACTION_RULES } from './monster-actions.js';
 import { MONSTER_SKILLS } from './monster-skills.js';
@@ -12,6 +13,7 @@ import { REGIONS } from './regions.js';
 import { SKILLS } from './skills.js';
 import { STATUSES } from './statuses.js';
 import { UNITS } from './units.js';
+import { isSymbol } from '../symbols.js';
 
 export function validateGameData() {
   const errors = [];
@@ -50,6 +52,7 @@ export function validateGameData() {
     const effects = [
       ...(source.effects ?? []),
       ...(source.battleStartEffects ?? []),
+      ...(source.equipmentEffects ?? []).flatMap((effect) => effect.effects ?? []),
       ...(source.levels ?? []).flatMap((level) => level.effects ?? []),
     ];
     for (const effect of effects) {
@@ -69,6 +72,16 @@ export function validateGameData() {
       && (!Number.isInteger(source.actionCost) || source.actionCost < 0)
     ) {
       errors.push(`消耗品 ${source.id} 的 actionCost 必須是非負整數`);
+    }
+
+    for (const effect of source.equipmentEffects ?? []) {
+      if (!ITEM_EFFECT_TRIGGERS.includes(effect.trigger)) {
+        errors.push(`裝備 ${source.id} 的觸發時間不合法：${effect.trigger}`);
+      }
+      validateItemEffect(source.id, effect, errors);
+    }
+    for (const effect of source.combatEffects ?? []) {
+      validateItemEffect(source.id, effect, errors);
     }
 
     if (source.lootEligible) {
@@ -260,5 +273,32 @@ function validateRarityWeights(weights, rarities, source, errors) {
   }
   if (values.reduce((sum, weight) => sum + weight, 0) <= 0) {
     errors.push(`${source}至少需要一個大於0的權重`);
+  }
+}
+
+function validateItemEffect(itemId, effect, errors) {
+  if (!ITEM_EFFECT_TYPES.includes(effect.type)) {
+    errors.push(`道具 ${itemId} 的效果類型不合法：${effect.type}`);
+  }
+  if (effect.symbolId !== undefined && !isSymbol(effect.symbolId)) {
+    errors.push(`道具 ${itemId} 指向不存在的牌面：${effect.symbolId}`);
+  }
+  if (effect.requiresSymbolId !== undefined && !isSymbol(effect.requiresSymbolId)) {
+    errors.push(`道具 ${itemId} 指向不存在的觸發牌面：${effect.requiresSymbolId}`);
+  }
+  if (effect.statusId !== undefined) {
+    checkReference(STATUSES, effect.statusId, `道具 ${itemId} 的效果`, errors);
+  }
+  if (
+    effect.chance !== undefined
+    && (!Number.isFinite(effect.chance) || effect.chance < 0 || effect.chance > 1)
+  ) {
+    errors.push(`道具 ${itemId} 的效果機率必須介於0與1`);
+  }
+  if (
+    effect.resource !== undefined
+    && !['action', 'armor', 'mana'].includes(effect.resource)
+  ) {
+    errors.push(`道具 ${itemId} 的資源類型不合法：${effect.resource}`);
   }
 }

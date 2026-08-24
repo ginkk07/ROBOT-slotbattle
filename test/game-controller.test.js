@@ -138,7 +138,7 @@ test('玩家可在profile各選一個技能與道具並帶入下一場', async (
   const selected = await controller.handleComponent({
     customId: 'slotbattle-profile:item',
     userId: 'player-1',
-    values: ['flame-sword'],
+    values: ['sword'],
   });
   await controller.handleCommand({
     commandName: 'slotbattle',
@@ -147,9 +147,40 @@ test('玩家可在profile各選一個技能與道具並帶入下一場', async (
   });
   const session = await store.getSession('loadout-test');
 
-  assert.match(selected.payload.embeds[0].fields[1].value, /燃焰之劍/);
+  assert.match(selected.payload.embeds[0].fields[1].value, /劍/);
   assert.deepEqual(session.state.player.skillIds, ['power-strike']);
-  assert.equal(session.state.player.equipment.weapon, 'flame-sword');
+  assert.deepEqual(session.state.player.equipment, ['sword']);
+});
+
+test('裝備選單可以開啟所選裝備的詳情', async () => {
+  const store = new MemoryGameStore();
+  const controller = controllerFor(store, 'equipment-select-controller');
+  await controller.handleCommand({
+    commandName: 'slotbattle',
+    subcommand: 'profile',
+    userId: 'player-1',
+  });
+  await controller.handleComponent({
+    customId: 'slotbattle-profile:item',
+    userId: 'player-1',
+    values: ['sword'],
+  });
+  await controller.handleCommand({
+    commandName: 'slotbattle',
+    subcommand: 'start',
+    userId: 'player-1',
+  });
+
+  const detail = await controller.handleComponent({
+    customId: 'slotbattle:equipment-select-controller:detail-equipment',
+    userId: 'player-1',
+    values: ['sword'],
+  });
+  assert.match(detail.payload.embeds[0].title, /🎒 劍/);
+  assert.deepEqual(
+    detail.payload.components[0].components.map((component) => component.label),
+    ['關閉'],
+  );
 });
 
 test('其他玩家無法操作別人的戰鬥面板', async () => {

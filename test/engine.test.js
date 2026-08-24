@@ -62,7 +62,7 @@ function springEventState(skillIds = ['power-strike']) {
 
 test('新戰鬥取得4點行動點，護甲與法力從0開始', () => {
   const state = game();
-  assert.equal(state.schemaVersion, 4);
+  assert.equal(state.schemaVersion, 5);
   assert.equal(state.phase, GamePhase.PLAYER_TURN);
   assert.deepEqual(state.resources, { action: 4, armor: 0, mana: 0 });
 });
@@ -250,7 +250,7 @@ test('消耗品可在戰鬥中使用並從背包扣除', () => {
   assert.deepEqual(state.player.inventory, []);
 });
 
-test('燃焰之劍在每場戰鬥開始時取得攻擊力狀態並持續3回合', () => {
+test('劍在每場戰鬥開始時取得攻擊力狀態並持續3回合', () => {
   let state = createGame({
     id: 'equipment-test',
     ownerId: 'player-1',
@@ -259,14 +259,14 @@ test('燃焰之劍在每場戰鬥開始時取得攻擊力狀態並持續3回合'
       initialEnemyUnitId: 'ruins-guardian',
       initialEnemyOverrides: { maxHp: 100, baseDamage: 0 },
     },
-    loadout: { skillIds: ['life-recovery'], itemIds: ['flame-sword'] },
+    loadout: { skillIds: ['life-recovery'], itemIds: ['sword'] },
     monsterRng: zero,
   });
   const attackUp = state.player.activeStatuses.find((status) => (
     status.statusId === 'attack-up'
   ));
 
-  assert.equal(state.player.equipment.weapon, 'flame-sword');
+  assert.deepEqual(state.player.equipment, ['sword']);
   assert.deepEqual(attackUp, {
     statusId: 'attack-up',
     sourceUnitId: 'wanderer',
@@ -532,7 +532,7 @@ test('舊版Boss戰存檔會升級為冒險格式', () => {
   legacy.resources = { action: 1, attack: 6, defense: 3, skill: 2 };
   const upgraded = upgradeGameState(legacy);
 
-  assert.equal(upgraded.schemaVersion, 4);
+  assert.equal(upgraded.schemaVersion, 5);
   assert.equal(upgraded.enemy.hp, 54);
   assert.deepEqual(upgraded.resources, { action: 1, armor: 3, mana: 2 });
   assert.equal(upgraded.adventure.regionDepth, 1);
