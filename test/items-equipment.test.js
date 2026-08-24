@@ -39,7 +39,7 @@ function battle(itemIds = [], {
 }
 
 test('新增道具完整收錄，且多件裝備會同時持有與生效', () => {
-  assert.equal(Object.keys(ITEMS).length, 23);
+  assert.equal(Object.keys(ITEMS).length, 24);
 
   const state = battle(['sword', 'iron-shield', 'vip-membership']);
   assert.deepEqual(state.player.equipment, [
@@ -127,22 +127,49 @@ test('懸賞令、頌缽與平安符在各自時機生效', () => {
   assert.equal(charm.player.hp, 44);
 });
 
-test('星海羅盤造成剩餘法力傷害，夏賜儀碇只在零傷害回合累積', () => {
+test('夏賜儀碇在星海羅盤之後判定，羅盤傷害會清除既有累積', () => {
   let state = battle([
     'star-sea-compass',
     'summer-gift-anchor',
     'magic-mushroom',
   ]);
-  state = useItem(state, 'magic-mushroom');
-  state = endPlayerTurn(state, { monsterRng: zero });
-
-  assert.equal(state.enemy.hp, 495);
-  assert.equal(state.resources.action, 4);
 
   state = endPlayerTurn(state, { monsterRng: zero });
   assert.equal(state.resources.action, 5);
   state = endPlayerTurn(state, { monsterRng: zero });
   assert.equal(state.resources.action, 6);
+
+  state = useItem(state, 'magic-mushroom');
+  state = endPlayerTurn(state, { monsterRng: zero });
+
+  assert.equal(state.enemy.hp, 495);
+  assert.equal(state.resources.action, 4);
+  assert.equal(state.combatModifiers.actionLimitBonus, 0);
+
+  const turnEndEvents = state.lastResolution.playerEquipmentEvents;
+  const compassIndex = turnEndEvents.findIndex((event) => (
+    event.itemId === 'star-sea-compass' && event.type === 'damage'
+  ));
+  const anchorIndex = turnEndEvents.findIndex((event) => (
+    event.itemId === 'summer-gift-anchor' && event.type === 'reset-action-limit'
+  ));
+  assert.ok(compassIndex >= 0 && compassIndex < anchorIndex);
+});
+
+test('夏賜儀碇最多累積5點，之後造成傷害會全部清除', () => {
+  let state = battle(['summer-gift-anchor']);
+
+  for (let round = 0; round < 6; round += 1) {
+    state = endPlayerTurn(state, { monsterRng: zero });
+  }
+
+  assert.equal(state.combatModifiers.actionLimitBonus, 5);
+  assert.equal(state.resources.action, 9);
+
+  state = placeBet(state, 1, { reels: [ATTACK, DEFENSE, SKILL] });
+  state = endPlayerTurn(state, { monsterRng: zero });
+  assert.equal(state.combatModifiers.actionLimitBonus, 0);
+  assert.equal(state.resources.action, 4);
 });
 
 test('傳說燃焰之劍在拉霸造成傷害後加燃燒並依目前層數追加傷害', () => {
@@ -219,9 +246,35 @@ test('舊存檔的初始燃焰之劍會遷移成普通劍', () => {
       itemIds: ['flame-sword'],
     },
   });
-  assert.ok(upgradedProfile.unlockedStartingItemIds.includes('sword'));
-  assert.ok(!upgradedProfile.unlockedStartingItemIds.includes('flame-sword'));
+  assert.deepEqual(upgradedProfile.unlockedStartingItemIds, [
+    'sword',
+    'lucky-clover',
+    'shuriken',
+  ]);
   assert.deepEqual(upgradedProfile.lastStartingLoadout.itemIds, ['sword']);
+});
+
+test('v4玩家改用新版開局選項，且真正的傳說燃焰之劍不會被誤轉換', () => {
+  const upgradedProfile = upgradePlayerProfile({
+    playerId: 'player-1',
+    saveVersion: 4,
+    unlockedStartingSkillIds: ['life-recovery'],
+    unlockedStartingItemIds: [
+      'healing-potion',
+      'fire-bomb',
+      'sword',
+      'flame-sword',
+    ],
+    lastStartingLoadout: { skillIds: ['life-recovery'], itemIds: ['flame-sword'] },
+  });
+
+  assert.deepEqual(upgradedProfile.unlockedStartingItemIds, [
+    'sword',
+    'flame-sword',
+    'lucky-clover',
+    'shuriken',
+  ]);
+  assert.deepEqual(upgradedProfile.lastStartingLoadout.itemIds, ['flame-sword']);
 });
 
 function sequence(values) {

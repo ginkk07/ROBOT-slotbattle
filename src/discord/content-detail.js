@@ -1,7 +1,12 @@
 import { contentTypeEmoji, contentTypeMeta } from '../game/data/content-types.js';
 import { getItem } from '../game/data/items.js';
 import { rarityLabel } from '../game/data/rarities.js';
-import { getSkill, getSkillLevelDefinition } from '../game/data/skills.js';
+import { SkillActivation } from '../game/data/skill-effects.js';
+import {
+  getSkill,
+  getSkillLevelDefinition,
+  skillActivation,
+} from '../game/data/skills.js';
 import {
   itemActionAvailability,
   skillActionAvailability,
@@ -32,12 +37,15 @@ function renderSkillDetail(state, skillId) {
   const skill = getSkill(skillId);
   const definition = getSkillLevelDefinition(skillId, level);
   const availability = skillActionAvailability(state, skillId);
+  const passive = skillActivation(skill) === SkillActivation.PASSIVE;
   return detailPayload({
     state,
     title: `${contentTypeEmoji('skill')} ${skill.name} Lv.${level}`,
     fields: [
       { name: '稀有度', value: rarityLabel(skill.rarity), inline: true },
-      { name: '法力消耗', value: String(skill.cost), inline: true },
+      passive
+        ? { name: '技能類型', value: '被動技能', inline: true }
+        : { name: '法力消耗', value: String(skill.cost), inline: true },
       { name: '效果', value: definition.description, inline: false },
       availabilityField(availability),
     ],

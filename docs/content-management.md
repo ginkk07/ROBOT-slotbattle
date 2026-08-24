@@ -69,11 +69,12 @@
 ### 新增玩家技能
 
 1. 在 `skills.js` 建立唯一且不再重複使用的 ID。
-2. 設定 `cost`、`rarity`、`description`、`effects` 與掉落標籤。
-3. 在 `levels` 依序建立 Lv.1～Lv.3 的 `description` 與 `effects`；最外層 `description`、`effects` 保持與 Lv.1 一致，供舊呼叫端與資料檢視使用。
+2. 在 `skill-effects.js` 選擇 `active` 或 `passive`。主動技能設定 `cost` 與 `effects`；被動技能不設定使用成本，改用 `passiveEffects`。
+3. 在 `levels` 依序建立 Lv.1～Lv.3 的 `description` 與對應效果；最外層效果保持與 Lv.1 一致，供資料檢視使用。
 4. 如果需要新狀態，先在 `statuses.js` 建立狀態。
 5. 若要預設開局解鎖，將 ID 加入 `player-progression.js`；若由成就解鎖，寫入 `achievements.js`。
-6. 補每個等級的效果、獎勵升級與資料驗證測試。
+6. 新的被動效果統一在 `passive-skill-engine.js` 結算，不要在主戰鬥流程依技能 ID 判斷。
+7. 補每個等級的效果、獎勵升級、介面與資料驗證測試。
 
 ### 新增怪物
 

@@ -10,6 +10,11 @@ import { MONSTER_SKILLS } from './monster-skills.js';
 import { PLAYER_PROGRESSION_RULES } from './player-progression.js';
 import { ContentRarity, EventRarity } from './rarities.js';
 import { REGIONS } from './regions.js';
+import {
+  PASSIVE_SKILL_EFFECT_TYPES,
+  SKILL_ACTIVATIONS,
+  SkillActivation,
+} from './skill-effects.js';
 import { SKILLS } from './skills.js';
 import { STATUSES } from './statuses.js';
 import { UNITS } from './units.js';
@@ -230,6 +235,20 @@ export function validateGameData() {
     errors.push('開局技能欄位不可多於冒險技能持有上限');
   }
   for (const skill of Object.values(SKILLS)) {
+    const activation = skill.activation ?? SkillActivation.ACTIVE;
+    if (!SKILL_ACTIVATIONS.includes(activation)) {
+      errors.push(`技能 ${skill.id} 的 activation 不合法：${activation}`);
+    }
+    if (
+      activation === SkillActivation.ACTIVE
+      && (!Number.isInteger(skill.cost) || skill.cost < 0)
+    ) {
+      errors.push(`主動技能 ${skill.id} 的 cost 必須是非負整數`);
+    }
+    for (const effect of skill.passiveEffects ?? []) {
+      validatePassiveSkillEffect(skill.id, effect, errors);
+    }
+
     const levels = skill.levels?.length ?? 1;
     if (levels !== PLAYER_PROGRESSION_RULES.maxSkillLevel) {
       errors.push(
@@ -240,8 +259,15 @@ export function validateGameData() {
       if (typeof level.description !== 'string' || !level.description.trim()) {
         errors.push(`技能 ${skill.id} 的 Lv.${index + 1} 缺少說明`);
       }
-      if (!Array.isArray(level.effects) || level.effects.length === 0) {
-        errors.push(`技能 ${skill.id} 的 Lv.${index + 1} 缺少效果`);
+      const effects = activation === SkillActivation.PASSIVE
+        ? level.passiveEffects
+        : level.effects;
+      if (!Array.isArray(effects) || effects.length === 0) {
+        const label = activation === SkillActivation.PASSIVE ? '被動效果' : '效果';
+        errors.push(`技能 ${skill.id} 的 Lv.${index + 1} 缺少${label}`);
+      }
+      for (const effect of level.passiveEffects ?? []) {
+        validatePassiveSkillEffect(skill.id, effect, errors);
       }
     }
   }
@@ -300,5 +326,29 @@ function validateItemEffect(itemId, effect, errors) {
     && !['action', 'armor', 'mana'].includes(effect.resource)
   ) {
     errors.push(`道具 ${itemId} 的資源類型不合法：${effect.resource}`);
+  }
+  if (
+    effect.maxBonus !== undefined
+    && (!Number.isInteger(effect.maxBonus) || effect.maxBonus < 1)
+  ) {
+    errors.push(`道具 ${itemId} 的 maxBonus 必須是正整數`);
+  }
+  if (
+    effect.resetOnDamage !== undefined
+    && typeof effect.resetOnDamage !== 'boolean'
+  ) {
+    errors.push(`道具 ${itemId} 的 resetOnDamage 必須是布林值`);
+  }
+}
+
+function validatePassiveSkillEffect(skillId, effect, errors) {
+  if (!PASSIVE_SKILL_EFFECT_TYPES.includes(effect.type)) {
+    errors.push(`技能 ${skillId} 的被動效果類型不合法：${effect.type}`);
+  }
+  if (
+    effect.damagePerMana !== undefined
+    && (!Number.isInteger(effect.damagePerMana) || effect.damagePerMana < 1)
+  ) {
+    errors.push(`技能 ${skillId} 的 damagePerMana 必須是正整數`);
   }
 }

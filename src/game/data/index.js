@@ -33,7 +33,15 @@ export {
   getSkill,
   getSkillLevelDefinition,
   getSkillMaxLevel,
+  skillActivation,
+  skillUsageLabel,
 } from './skills.js';
+export {
+  PASSIVE_SKILL_EFFECT_TYPES,
+  SKILL_ACTIVATIONS,
+  PassiveSkillEffectType,
+  SkillActivation,
+} from './skill-effects.js';
 export {
   BossRuleMode,
   STATUSES,

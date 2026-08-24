@@ -4,7 +4,12 @@ import { getEvent } from './data/events.js';
 import { ItemEffectTrigger, ItemEffectType } from './data/item-effects.js';
 import { getItem } from './data/items.js';
 import { getRegion } from './data/regions.js';
-import { getSkill, getSkillLevelDefinition } from './data/skills.js';
+import { SkillActivation } from './data/skill-effects.js';
+import {
+  getSkill,
+  getSkillLevelDefinition,
+  skillActivation,
+} from './data/skills.js';
 import { getStatus } from './data/statuses.js';
 import { getUnit, UnitRank } from './data/units.js';
 import {
@@ -25,13 +30,16 @@ import {
   healingResourceBonus,
   minimumEliteEncounterChance,
   normalizeEquipmentIds,
+  preservesTurnResource,
   promotesSymbolsWithLucky,
   reduceIncomingDamageWithEquipment,
+  resourceGainAmount,
   spinDamageModifiers,
 } from './engines/equipment-engine.js';
 import { resolveEvent } from './engines/event-engine.js';
 import { rollRewardChoices } from './engines/loot-engine.js';
 import { selectMonsterIntent } from './engines/monster-action-engine.js';
+import { resolveManaArmor } from './engines/passive-skill-engine.js';
 import {
   grantSkillReward,
   forgetSkill,
@@ -235,8 +243,16 @@ export function placeBet(
   });
   attackDamage += flameSword.damage;
 
-  const armorGained = outcome.awarded.defense + afterSpin.resources.armor;
-  const manaGained = outcome.awarded.skill + afterSpin.resources.mana;
+  const armorGained = resourceGainAmount(
+    next.player,
+    'armor',
+    outcome.awarded.defense + afterSpin.resources.armor,
+  );
+  const manaGained = resourceGainAmount(
+    next.player,
+    'mana',
+    outcome.awarded.skill + afterSpin.resources.mana,
+  );
   next.resources.armor += armorGained;
   next.resources.mana += manaGained;
   next.resources.action = Math.min(
@@ -274,6 +290,9 @@ export function activateSkill(
   }
 
   const skill = getSkill(skillId);
+  if (skillActivation(skill) === SkillActivation.PASSIVE) {
+    throw new Error(`${skill.name}是自動生效的被動技能`);
+  }
   const skillLevel = playerSkillLevel(next.player, skillId);
   const levelDefinition = getSkillLevelDefinition(skillId, skillLevel);
   if (!Number.isInteger(skill.cost) || skill.cost < 0) {
@@ -390,7 +409,6 @@ export function endPlayerTurn(
     playerTurnEndStatus.events,
   );
   const playerTurnEndEquipmentEvents = resolvePlayerTurnEndEquipment(next);
-  const discardedMana = next.resources.mana;
 
   if (next.enemy.hp === 0) {
     next.history.push({
@@ -420,9 +438,14 @@ export function endPlayerTurn(
     next.player,
     incomingAfterArmor,
   );
+  const manaArmor = resolveManaArmor(next.player, {
+    damage: reducedIncomingDamage,
+    mana: next.resources.mana,
+  });
+  next.resources.mana -= manaArmor.manaSpent;
   const damageTaken = Math.min(
     next.player.hp,
-    reducedIncomingDamage,
+    manaArmor.damage,
   );
   next.player.hp -= damageTaken;
 
@@ -443,7 +466,10 @@ export function endPlayerTurn(
     ? resolveTriggeredStatuses(next.enemy, 'turn-end')
     : { unit: next.enemy, events: [] };
   next.enemy = advanceStatusDurations(enemyTurnEndStatus.unit);
-  clearTurnResources(next);
+  const discardedResources = clearTurnResources(next, {
+    preserveBetweenTurns: true,
+  });
+  const discardedMana = discardedResources.mana;
   next.stunned = false;
 
   if (next.player.hp === 0) {
@@ -477,6 +503,8 @@ export function endPlayerTurn(
     },
     enemyAttack: intent.damage,
     bossAttack: intent.damage,
+    manaArmorBlocked: manaArmor.blocked,
+    manaSpent: manaArmor.manaSpent,
     damageTaken,
     monsterEffectEvents,
     enemyStatusEvents: [
@@ -965,7 +993,12 @@ function applyPlayerEffects(state, { effects = [], rng } = {}) {
 function applyHealingEquipmentBonus(state, events) {
   const bonus = healingResourceBonus(state.player, events);
   const bonusEvents = [];
-  for (const [resource, amount] of Object.entries(bonus)) {
+  for (const [resource, requestedAmount] of Object.entries(bonus)) {
+    const amount = resourceGainAmount(
+      state.player,
+      resource,
+      requestedAmount,
+    );
     if (amount <= 0) continue;
     if (resource === 'action') {
       state.resources.action = Math.min(
@@ -998,18 +1031,24 @@ function applyCombatItemEffects(state, item) {
     }
 
     if (effect.type === ItemEffectType.GAIN_RESOURCE) {
+      const amount = resourceGainAmount(
+        state.player,
+        effect.resource,
+        effect.amount,
+      );
+      if (amount <= 0) continue;
       if (effect.resource === 'action') {
         state.resources.action = Math.min(
           playerActionLimit(state),
-          state.resources.action + effect.amount,
+          state.resources.action + amount,
         );
       } else {
-        state.resources[effect.resource] += effect.amount;
+        state.resources[effect.resource] += amount;
       }
       events.push({
         type: 'gain-resource',
         resource: effect.resource,
-        amount: effect.amount,
+        amount,
       });
       continue;
     }
@@ -1074,7 +1113,8 @@ function resolveAfterSpinDamageEquipment(state, { spinDamage, rng }) {
 function resolvePlayerTurnEndEquipment(state) {
   const events = [];
 
-  // 先結算星海羅盤等回合末傷害，再判斷本回合是否「沒有造成傷害」。
+  // 回合末傷害必須先結算。這能讓後面的夏賜儀碇把星海羅盤傷害
+  // 一併視為「本回合有造成傷害」，並清除先前累積的額外上限。
   for (const { itemId, effect } of equipmentEffectEntries(
     state.player,
     ItemEffectTrigger.PLAYER_TURN_END,
@@ -1090,12 +1130,29 @@ function resolvePlayerTurnEndEquipment(state) {
     ItemEffectTrigger.PLAYER_TURN_END,
     ItemEffectType.INCREASE_ACTION_LIMIT_IF_NO_DAMAGE,
   )) {
-    if (state.combatModifiers.damageDealtThisTurn > 0) continue;
-    state.combatModifiers.actionLimitBonus += effect.amount;
+    const currentBonus = Number(state.combatModifiers.actionLimitBonus ?? 0);
+
+    if (state.combatModifiers.damageDealtThisTurn > 0) {
+      if (effect.resetOnDamage && currentBonus > 0) {
+        state.combatModifiers.actionLimitBonus = 0;
+        events.push({
+          type: 'reset-action-limit',
+          itemId,
+          amount: currentBonus,
+        });
+      }
+      continue;
+    }
+
+    const maxBonus = Number(effect.maxBonus ?? Number.POSITIVE_INFINITY);
+    const amount = Math.min(effect.amount, Math.max(0, maxBonus - currentBonus));
+    if (amount <= 0) continue;
+
+    state.combatModifiers.actionLimitBonus = currentBonus + amount;
     events.push({
       type: 'increase-action-limit',
       itemId,
-      amount: effect.amount,
+      amount,
     });
   }
 
@@ -1117,7 +1174,8 @@ function playerActionLimit(state) {
 
 function createCombatModifiers() {
   return {
-    // 夏賜儀碇在本場戰鬥累積的每回合行動點上限。
+    // 夏賜儀碇在本場戰鬥累積的行動點上限；其最大值與清除條件
+    // 定義在 items.js，換道具數值時不需要修改存檔結構。
     actionLimitBonus: 0,
     // 只計玩家在目前回合實際對敵人造成的傷害。
     damageDealtThisTurn: 0,
@@ -1258,6 +1316,9 @@ function summarizeEffectEvents(events) {
     if (event.type === 'increase-action-limit') {
       return [`本場戰鬥❇️上限＋${event.amount}`];
     }
+    if (event.type === 'reset-action-limit') {
+      return [`清除本場戰鬥累積的❇️上限（－${event.amount}）`];
+    }
     if (event.type === 'apply-status' && event.applied) {
       const status = getStatus(event.statusId);
       if (status.durationMode === 'until-consumed') {
@@ -1305,10 +1366,19 @@ function consumeSpinDamageMultiplier(player) {
   return { player: next, multiplier };
 }
 
-function clearTurnResources(state) {
-  state.resources.action = 0;
-  state.resources.armor = 0;
-  state.resources.mana = 0;
+function clearTurnResources(
+  state,
+  { preserveBetweenTurns = false } = {},
+) {
+  const discarded = { action: 0, armor: 0, mana: 0 };
+  for (const resource of Object.keys(discarded)) {
+    const preserve = preserveBetweenTurns
+      && preservesTurnResource(state.player, resource);
+    if (preserve) continue;
+    discarded[resource] = Number(state.resources[resource] ?? 0);
+    state.resources[resource] = 0;
+  }
+  return discarded;
 }
 
 function clearCombatPresentation(state) {

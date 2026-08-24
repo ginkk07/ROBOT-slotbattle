@@ -9,9 +9,9 @@ export const PLAYER_PROGRESSION_RULES = deepFreeze({
     'fire-imbue',
   ],
   defaultUnlockedStartingItemIds: [
-    'healing-potion',
-    'fire-bomb',
     'sword',
+    'lucky-clover',
+    'shuriken',
   ],
   startingSkillSlots: 1,
   startingItemSlots: 1,

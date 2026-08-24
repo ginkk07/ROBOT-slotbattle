@@ -39,7 +39,7 @@ test('玩家資料頁可各選一個開局技能與道具', () => {
 
   assert.equal(embed.title, '🧭 開局配置');
   assert.match(embed.fields[0].value, /治癒/);
-  assert.match(embed.fields[1].value, /生命藥水/);
+  assert.match(embed.fields[1].value, /劍/);
   assert.equal(payload.components.length, 2);
   assert.equal(payload.components[0].components[0].type, 3);
   assert.equal(payload.components[0].components[0].options.length, 3);
@@ -52,7 +52,11 @@ test('玩家資料頁可各選一個開局技能與道具', () => {
   );
   assert.deepEqual(
     payload.components[1].components[0].options.map((option) => option.emoji.name),
-    ['🧪', '🧪', '🎒'],
+    ['🎒', '🎒', '🎒'],
+  );
+  assert.deepEqual(
+    payload.components[1].components[0].options.map((option) => option.label),
+    ['劍', '幸運草', '手裡劍'],
   );
 });
 
@@ -168,6 +172,23 @@ test('技能詳情依目前可用性顯示使用與關閉按鈕', () => {
   assert.deepEqual(
     usable.components[0].components.map((component) => component.label),
     ['使用', '關閉'],
+  );
+});
+
+test('被動技能詳情不顯示法力消耗與使用按鈕', () => {
+  const state = createGame({
+    id: 'passive-skill-detail-test',
+    ownerId: 'player-1',
+    loadout: { skillIds: ['mana-armor'], itemIds: [] },
+  });
+  const detail = renderContentDetail(state, 'skill', 'mana-armor');
+
+  assert.equal(detail.embeds[0].fields[1].name, '技能類型');
+  assert.equal(detail.embeds[0].fields[1].value, '被動技能');
+  assert.match(detail.embeds[0].fields[2].value, /每消耗1點✨可抵擋1點傷害/);
+  assert.deepEqual(
+    detail.components[0].components.map((component) => component.label),
+    ['關閉'],
   );
 });
 

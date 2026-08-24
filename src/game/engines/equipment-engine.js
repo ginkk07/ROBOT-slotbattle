@@ -61,6 +61,23 @@ export function equipmentActionLimitBonus(player) {
   ).reduce((total, { effect }) => total + effect.amount, 0);
 }
 
+export function resourceGainAmount(player, resource, amount) {
+  const blocked = equipmentEffectEntries(
+    player,
+    ItemEffectTrigger.RESOURCE_GAIN,
+    ItemEffectType.BLOCK_RESOURCE_GAIN,
+  ).some(({ effect }) => effect.resource === resource);
+  return blocked ? 0 : amount;
+}
+
+export function preservesTurnResource(player, resource) {
+  return equipmentEffectEntries(
+    player,
+    ItemEffectTrigger.TURN_RESOURCES_CLEAR,
+    ItemEffectType.PRESERVE_RESOURCE,
+  ).some(({ effect }) => effect.resource === resource);
+}
+
 export function promotesSymbolsWithLucky(player) {
   return equipmentEffectEntries(
     player,
@@ -136,12 +153,14 @@ export function afterSpinEquipmentBonuses(
     if (effect.requiresSymbolId && !reels.includes(effect.requiresSymbolId)) continue;
 
     if (effect.type === ItemEffectType.GAIN_RESOURCE) {
-      resources[effect.resource] += effect.amount;
+      const amount = resourceGainAmount(player, effect.resource, effect.amount);
+      if (amount <= 0) continue;
+      resources[effect.resource] += amount;
       events.push({
         type: 'gain-resource',
         itemId,
         resource: effect.resource,
-        amount: effect.amount,
+        amount,
       });
       continue;
     }
@@ -157,12 +176,14 @@ export function afterSpinEquipmentBonuses(
       && wager === effect.wager
       && probabilityRoll(chanceRng) < effect.chance
     ) {
-      resources[effect.resource] += effect.amount;
+      const amount = resourceGainAmount(player, effect.resource, effect.amount);
+      if (amount <= 0) continue;
+      resources[effect.resource] += amount;
       events.push({
         type: 'gain-resource',
         itemId,
         resource: effect.resource,
-        amount: effect.amount,
+        amount,
       });
     }
   }
@@ -188,12 +209,18 @@ export function applyTriggeredEquipmentEffects(state, trigger) {
     }
 
     if (effect.type === ItemEffectType.GAIN_RESOURCE) {
-      state.resources[effect.resource] += effect.amount;
+      const amount = resourceGainAmount(
+        state.player,
+        effect.resource,
+        effect.amount,
+      );
+      if (amount <= 0) continue;
+      state.resources[effect.resource] += amount;
       events.push({
         type: 'gain-resource',
         itemId,
         resource: effect.resource,
-        amount: effect.amount,
+        amount,
       });
     }
   }

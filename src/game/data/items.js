@@ -244,6 +244,26 @@ export const ITEMS = createCatalog([
       type: ItemEffectType.PROMOTE_WITH_LUCKY,
     }],
   }),
+  equipment({
+    id: 'cursed-snake-scale',
+    name: '詛咒蛇麟',
+    rarity: ContentRarity.RARE,
+    description: '敵人行動結束後保留剩餘✨，但無法獲得🛡️。',
+    equipmentEffects: [
+      {
+        // 只保留同一場戰鬥的跨回合法力；勝利、換敵人與遊戲結束仍會清空。
+        trigger: ItemEffectTrigger.TURN_RESOURCES_CLEAR,
+        type: ItemEffectType.PRESERVE_RESOURCE,
+        resource: 'mana',
+      },
+      {
+        // 所有護甲來源都會經過共用資源入口，因此不必逐一道具寫例外。
+        trigger: ItemEffectTrigger.RESOURCE_GAIN,
+        type: ItemEffectType.BLOCK_RESOURCE_GAIN,
+        resource: 'armor',
+      },
+    ],
+  }),
 
   equipment({
     id: 'vip-membership',
@@ -285,11 +305,14 @@ export const ITEMS = createCatalog([
     id: 'summer-gift-anchor',
     name: '夏賜儀碇',
     rarity: ContentRarity.LEGENDARY,
-    description: '如果回合中沒有造成傷害，本場戰鬥❇️上限＋1；每個符合條件的回合都可累積。',
+    description: '星海羅盤結算後，如果本回合沒有造成傷害，本場戰鬥❇️上限＋1，最多＋5；造成傷害時清除累積。',
     equipmentEffects: [{
       trigger: ItemEffectTrigger.PLAYER_TURN_END,
       type: ItemEffectType.INCREASE_ACTION_LIMIT_IF_NO_DAMAGE,
       amount: 1,
+      // 此上限只限制夏賜儀碇的戰鬥內累積，不包含VIP會員等其他加成。
+      maxBonus: 5,
+      resetOnDamage: true,
     }],
   }),
 

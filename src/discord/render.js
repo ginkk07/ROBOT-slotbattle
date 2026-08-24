@@ -2,7 +2,11 @@ import { ACHIEVEMENTS } from '../game/data/achievements.js';
 import { contentTypeEmoji } from '../game/data/content-types.js';
 import { getItem } from '../game/data/items.js';
 import { rarityLabel } from '../game/data/rarities.js';
-import { getSkill, getSkillLevelDefinition } from '../game/data/skills.js';
+import {
+  getSkill,
+  getSkillLevelDefinition,
+  skillUsageLabel,
+} from '../game/data/skills.js';
 import { getStatus } from '../game/data/statuses.js';
 import {
   GamePhase,
@@ -64,7 +68,7 @@ export function renderProfile(profileRecord) {
         name: '目前技能',
         value: selectedSkills.length
           ? selectedSkills.map((skill) => (
-            `${contentTypeEmoji('skill')} **${skill.name}**｜${skill.cost} 法力\n${skill.description}`
+            `${contentTypeEmoji('skill')} **${skill.name}**｜${skillUsageLabel(skill)}\n${skill.description}`
           )).join('\n')
           : '尚未選擇',
         inline: false,
@@ -409,7 +413,7 @@ function skillSelect(profile, selectedIds) {
       return {
         label: skill.name,
         value: id,
-        description: `${skill.cost} 法力｜${skill.description}`.slice(0, 100),
+        description: `${skillUsageLabel(skill)}｜${skill.description}`.slice(0, 100),
         emoji: { name: contentTypeEmoji('skill') },
         default: selectedIds.includes(id),
       };
@@ -486,7 +490,7 @@ function rewardDescription(choice, content) {
     const acquisition = choice.acquisition === 'level-up'
       ? `技能升級｜Lv.${choice.currentLevel} → Lv.${choice.targetLevel}`
       : `新技能｜Lv.${choice.targetLevel ?? 1}`;
-    return `${acquisition}｜法力消耗 ${content.cost}\n${definition.description}`;
+    return `${acquisition}｜${skillUsageLabel(content)}\n${definition.description}`;
   }
   return `${itemTypeLabel(content)}\n${content.description}`;
 }

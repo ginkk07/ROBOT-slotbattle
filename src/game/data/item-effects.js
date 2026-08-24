@@ -14,6 +14,8 @@ export const ItemEffectTrigger = deepFreeze({
   HEAL: 'heal',
   DAMAGE_TAKEN: 'damage-taken',
   PLAYER_TURN_END: 'player-turn-end',
+  RESOURCE_GAIN: 'resource-gain',
+  TURN_RESOURCES_CLEAR: 'turn-resources-clear',
 });
 
 export const ItemEffectType = deepFreeze({
@@ -31,8 +33,9 @@ export const ItemEffectType = deepFreeze({
   DAMAGE_FROM_RESOURCE: 'damage-from-resource',
   APPLY_BURN_AND_DAMAGE: 'apply-burn-and-damage',
   INCREASE_ACTION_LIMIT_IF_NO_DAMAGE: 'increase-action-limit-if-no-damage',
+  BLOCK_RESOURCE_GAIN: 'block-resource-gain',
+  PRESERVE_RESOURCE: 'preserve-resource',
 });
 
 export const ITEM_EFFECT_TRIGGERS = deepFreeze(Object.values(ItemEffectTrigger));
 export const ITEM_EFFECT_TYPES = deepFreeze(Object.values(ItemEffectType));
-

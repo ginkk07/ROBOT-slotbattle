@@ -2,7 +2,14 @@ import { ITEMS } from '../game/data/items.js';
 import { PLAYER_PROGRESSION_RULES } from '../game/data/player-progression.js';
 import { SKILLS } from '../game/data/skills.js';
 
-export const PLAYER_SAVE_VERSION = 4;
+export const PLAYER_SAVE_VERSION = 5;
+
+// v4以前預設開放的消耗品已退出開局三選一；它們仍存在於道具庫，
+// 並可在冒險途中取得。此清單只供一次性的玩家存檔升級使用。
+const PRE_V5_DEFAULT_STARTING_ITEM_IDS = new Set([
+  'healing-potion',
+  'fire-bomb',
+]);
 
 export const STARTING_SKILL_IDS = (
   PLAYER_PROGRESSION_RULES.defaultUnlockedStartingSkillIds
@@ -45,7 +52,8 @@ export function upgradePlayerProfile(value, playerId = value?.playerId) {
   if (!playerId) throw new TypeError('更新玩家資料需要 playerId');
 
   const source = value ? structuredClone(value) : {};
-  if (Number(source.saveVersion ?? 0) < PLAYER_SAVE_VERSION) {
+  const sourceVersion = Number(source.saveVersion ?? 0);
+  if (sourceVersion < 4) {
     // 舊版同名「燃焰之劍」是現在的普通「劍」，不可直接升成傳說裝備。
     source.unlockedStartingItemIds = replaceLegacyStarterSword(
       source.unlockedStartingItemIds,
@@ -55,6 +63,13 @@ export function upgradePlayerProfile(value, playerId = value?.playerId) {
         source.lastStartingLoadout.itemIds,
       );
     }
+  }
+  if (sourceVersion < 5) {
+    // 舊玩家若選擇生命藥水或火焰炸彈，後面的配置檢查會自動退回
+    // 新選項中的第一件「劍」，不會留下已不可選的開局配置。
+    source.unlockedStartingItemIds = removePreV5DefaultStartingItems(
+      source.unlockedStartingItemIds,
+    );
   }
   const unlockedSkills = uniqueKnownIds(
     source.unlockedStartingSkillIds,
@@ -129,5 +144,12 @@ function replaceLegacyStarterSword(itemIds) {
   if (!Array.isArray(itemIds)) return itemIds;
   return itemIds.map((itemId) => (
     itemId === 'flame-sword' ? 'sword' : itemId
+  ));
+}
+
+function removePreV5DefaultStartingItems(itemIds) {
+  if (!Array.isArray(itemIds)) return itemIds;
+  return itemIds.filter((itemId) => (
+    !PRE_V5_DEFAULT_STARTING_ITEM_IDS.has(itemId)
   ));
 }
