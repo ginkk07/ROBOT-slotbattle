@@ -332,5 +332,6 @@ test('玩法說明使用定稿文案，不顯示固定行動點或內部機率',
   assert.match(description, /🍀則會同時獲得上述全部效果/);
   assert.match(description, /三個💀就會進入暈眩狀態/);
   assert.match(description, /\/slotbattle profile/);
+  assert.match(description, /最多可以持有3個技能，技能等級上限為3級/);
   assert.doesNotMatch(description, /4 點行動點|30%|最多拉霸|結束抽選/);
 });
