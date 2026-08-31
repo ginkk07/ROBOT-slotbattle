@@ -6,8 +6,9 @@
 
 | 想修改的內容 | 唯一管理位置 |
 |---|---|
-| 玩家技能、法力成本、Lv.1～3 效果、稀有度 | `src/game/data/skills.js` |
-| 怪物技能、傷害倍率、技能效果 | `src/game/data/monster-skills.js` |
+| 玩家技能、各等級法力成本、Lv.1～最高等級效果、稀有度 | `src/game/data/skills.js` |
+| 拉霸／技能／道具／裝備／狀態傷害來源分類 | `src/game/data/damage-sources.js` |
+| 怪物主動／被動技能、傷害倍率、技能效果 | `src/game/data/monster-skills.js` |
 | 普通／菁英／Boss 的普通攻擊率與技能數 | `src/game/data/monster-actions.js` |
 | 道具、裝備、行動點成本、稀有度 | `src/game/data/items.js` |
 | 裝備觸發時機與共用效果類型 | `src/game/data/item-effects.js` |
@@ -31,6 +32,7 @@
 
 - 只放內容定義、平衡數值、ID 與內容之間的引用。
 - 所有資料會深度凍結，執行中的戰鬥不能改到原始定義。
+- 怪物的 `skillIds` 同時引用主動與被動技能；新增技能時由技能本身的 `activation` 決定執行方式，不另建第二份被動技能欄位。
 - 不直接操作 Discord、D1 或玩家存檔。
 - 新增或修改資料後必須通過 `npm run validate-data`。
 
@@ -41,7 +43,8 @@
 - `loot-engine.js`：執行三選一的獨立稀有度與內容抽取。
 - `event-engine.js`：抽取及處理奇遇。
 - `effects.js`：技能與道具共用的傷害、治療與狀態效果。
-- `status-engine.js`：狀態成功率、抗性與疊加規則。
+- `passive-skill-engine.js`：依觸發時機載入玩家被動效果，交由處理器註冊表結算。
+- `status-engine.js`：狀態成功率、抗性、疊加、持續時間及攻擊觸發效果。
 - `skill-progression.js`：技能持有上限、等級正規化、升級與遺忘。
 - `action-availability.js`：戰鬥面板與詳情卡共用的技能／道具可用性判定。
 - `equipment-engine.js`：正規化多件裝備、查詢觸發效果與計算裝備加成。
@@ -69,12 +72,14 @@
 ### 新增玩家技能
 
 1. 在 `skills.js` 建立唯一且不再重複使用的 ID。
-2. 在 `skill-effects.js` 選擇 `active` 或 `passive`。主動技能設定 `cost` 與 `effects`；被動技能不設定使用成本，改用 `passiveEffects`。
-3. 在 `levels` 依序建立 Lv.1～Lv.3 的 `description` 與對應效果；最外層效果保持與 Lv.1 一致，供資料檢視使用。
+2. 在 `skill-effects.js` 選擇 `active` 或 `passive`。主動技能成本固定時在最外層設定 `cost`；成本隨等級變動時，改在每個 `levels[]` 設定 `cost`。
+3. 在 `levels` 依序建立 1～3 級的 `description` 與 `effects`／`passiveEffects`；沒有升級內容的技能只建立 1 級。最外層禁止再寫 `description`、`effects` 或 `passiveEffects`，避免 Lv.1 出現兩份資料。
 4. 如果需要新狀態，先在 `statuses.js` 建立狀態。
 5. 若要預設開局解鎖，將 ID 加入 `player-progression.js`；若由成就解鎖，寫入 `achievements.js`。
-6. 新的被動效果統一在 `passive-skill-engine.js` 結算，不要在主戰鬥流程依技能 ID 判斷。
-7. 補每個等級的效果、獎勵升級、介面與資料驗證測試。
+6. 既有主動效果會自動交給 `effects.js`；新的主動效果類型只在其處理器註冊表新增一次。
+7. 被動效果必須設定 `trigger` 與 `type`。新機制在 `skill-effects.js` 登記後，只於 `passive-skill-engine.js` 的處理器註冊表新增一次，不可在主戰鬥流程依技能 ID 判斷。
+8. 技能產生的攻擊狀態依 `statuses.js` 的 `trigger` 與 `effect.type` 結算；不可在主流程查找特定狀態 ID。
+9. 補每個等級的效果、獎勵升級、介面與資料驗證測試。
 
 ### 新增怪物
 
@@ -100,6 +105,8 @@
 - `symbol-roll`：調整拉霸牌面機率。
 - `spin-damage`／`after-spin`：計算拉霸傷害或牌面結算後。
 - `heal`／`damage-taken`：實際治療或護甲抵擋後受傷。
+- `after-enemy-attack`：敵人完整結束一次普通攻擊或怪物技能攻擊。
+- `turn-resources-clear`：敵人攻擊結束後清除或按比例保留回合資源。
 - `encounter-roll`：抽取下一個遭遇。
 
 磨刀石這類一次性牌面效果保存在 `combatModifiers.nextSpinSymbolChances`，拉霸抽牌後必須立即清除；進入新戰鬥時也會重設。介面 ICON 只分技能、裝備、消耗品，統一修改 `content-types.js`，不要在單一道具加入新 ICON。

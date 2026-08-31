@@ -12,6 +12,8 @@ export const REGIONS = createCatalog([
       boss: {
         minimumCompletedEncounters: 4,
         chancePerCompletedEncounter: 0.07,
+        // 地區 BOSS 被擊敗並進入勝利確認時，直接將玩家生命回復至上限。
+        restorePlayerHpAfterVictory: true,
       },
       event: {
         chance: 0.2,

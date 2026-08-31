@@ -218,6 +218,13 @@ test('怪物依階級判斷普通攻擊機率，再等機率抽取持有技能',
   assert.equal(getMonsterActionRule('boss').basicAttackChance, 0.2);
 
   const elite = scaleEnemyUnit(getUnit('elite-ruins-sentinel'), 1);
+  assert.deepEqual(elite.activeStatuses, [{
+    statusId: 'armor-reinforcement',
+    sourceUnitId: 'elite-ruins-sentinel',
+    remainingTurns: null,
+    stacks: 1,
+    potency: 1,
+  }]);
   const basic = selectMonsterIntent(elite, { rng: () => 0.39 });
   const firstSkill = selectMonsterIntent(elite, {
     rng: sequence([0.4, 0]),

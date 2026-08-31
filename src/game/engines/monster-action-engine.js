@@ -1,12 +1,18 @@
-import { getMonsterSkill } from '../data/monster-skills.js';
+import {
+  getMonsterSkill,
+  MonsterSkillActivation,
+} from '../data/monster-skills.js';
 import { getMonsterActionRule } from '../data/monster-actions.js';
 import { pickWeighted } from './weighted-random.js';
 
 export function selectMonsterIntent(unit, { rng = Math.random } = {}) {
   const rule = getMonsterActionRule(unit.rank);
+  const activeSkills = unit.skillIds
+    .map((skillId) => getMonsterSkill(skillId))
+    .filter((skill) => skill.activation === MonsterSkillActivation.ACTIVE);
 
   const roll = probabilityRoll(rng);
-  if (roll < rule.basicAttackChance || unit.skillIds.length === 0) {
+  if (roll < rule.basicAttackChance || activeSkills.length === 0) {
     return {
       type: 'basic-attack',
       name: '普通攻擊',
@@ -18,7 +24,7 @@ export function selectMonsterIntent(unit, { rng = Math.random } = {}) {
   }
 
   const skill = pickWeighted(
-    unit.skillIds.map((skillId) => getMonsterSkill(skillId)),
+    activeSkills,
     rng,
     (entry) => entry.selectionWeight ?? 1,
   );

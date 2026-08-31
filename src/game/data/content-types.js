@@ -5,8 +5,8 @@ import { deepFreeze } from './catalog.js';
  * 未來若要更換分類圖示，只需要修改這個檔案。
  */
 export const CONTENT_TYPE_META = deepFreeze({
-  skill: { label: '技能', emoji: '📘' },
-  equipment: { label: '裝備', emoji: '🎒' },
+  skill: { label: '技能', emoji: '⚡' },
+  equipment: { label: '裝備', emoji: '📦' },
   consumable: { label: '消耗品', emoji: '🧪' },
 });
 
@@ -19,4 +19,3 @@ export function contentTypeMeta(type) {
 export function contentTypeEmoji(type) {
   return contentTypeMeta(type).emoji;
 }
-

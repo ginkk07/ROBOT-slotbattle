@@ -120,6 +120,31 @@ export const ITEMS = createCatalog([
     }],
   }),
   equipment({
+    id: 'thorns',
+    name: '荊棘',
+    rarity: ContentRarity.COMMON,
+    description: '受到敵人攻擊時扣除的🛡️將會返還同樣的傷害。',
+    equipmentEffects: [{
+      trigger: ItemEffectTrigger.AFTER_ENEMY_ATTACK,
+      type: ItemEffectType.DAMAGE_FROM_SPENT_RESOURCE,
+      resource: 'armor',
+      multiplier: 1,
+      element: 'physical',
+    }],
+  }),
+  equipment({
+    id: 'magic-stone',
+    name: '魔石',
+    rarity: ContentRarity.COMMON,
+    description: '回合開始時獲得1點✨。',
+    equipmentEffects: [{
+      trigger: ItemEffectTrigger.PLAYER_TURN_START,
+      type: ItemEffectType.GAIN_RESOURCE,
+      resource: 'mana',
+      amount: 1,
+    }],
+  }),
+  equipment({
     id: 'shuriken',
     name: '手裡劍',
     rarity: ContentRarity.COMMON,
@@ -147,13 +172,13 @@ export const ITEMS = createCatalog([
     id: 'rune-cube',
     name: '符文魔方',
     rarity: ContentRarity.RARE,
-    description: '每次拉霸時出現[牌面🛡️]，就會額外獲得🛡️5點。',
+    description: '每次拉霸時出現[牌面🛡️]，就會額外獲得🛡️4點。',
     equipmentEffects: [{
       trigger: ItemEffectTrigger.AFTER_SPIN,
       type: ItemEffectType.GAIN_RESOURCE,
       requiresSymbolId: SymbolId.DEFENSE,
       resource: 'armor',
-      amount: 5,
+      amount: 4,
     }],
   }),
   equipment({
@@ -292,7 +317,7 @@ export const ITEMS = createCatalog([
     id: 'flame-sword',
     name: '燃焰之劍',
     rarity: ContentRarity.LEGENDARY,
-    description: '造成拉霸傷害時使燃燒層數＋1，並造成等同於目前燃燒層數的傷害。',
+    description: '造成拉霸傷害時使燃燒層數＋1，並造成等同於目前燃燒層數的技能傷害。',
     equipmentEffects: [{
       trigger: ItemEffectTrigger.AFTER_SPIN,
       type: ItemEffectType.APPLY_BURN_AND_DAMAGE,
@@ -313,6 +338,18 @@ export const ITEMS = createCatalog([
       // 此上限只限制夏賜儀碇的戰鬥內累積，不包含VIP會員等其他加成。
       maxBonus: 5,
       resetOnDamage: true,
+    }],
+  }),
+  equipment({
+    id: 'diamond',
+    name: '金剛石',
+    rarity: ContentRarity.LEGENDARY,
+    description: '回合開始時保留一半的🛡️。',
+    equipmentEffects: [{
+      trigger: ItemEffectTrigger.TURN_RESOURCES_CLEAR,
+      type: ItemEffectType.PRESERVE_RESOURCE,
+      resource: 'armor',
+      ratio: 0.5,
     }],
   }),
 

@@ -1,7 +1,9 @@
 import { createCatalog, requireDefinition } from './catalog.js';
+import { EffectType } from './effect-types.js';
 import { ContentRarity } from './rarities.js';
 import {
   PassiveSkillEffectType,
+  PassiveSkillTrigger,
   SkillActivation,
 } from './skill-effects.js';
 
@@ -16,22 +18,18 @@ export const SKILLS = createCatalog([
     lootWeight: 100,
     lootTags: ['ruins'],
     cost: 3,
-    description: '回復 5 點生命。',
-    effects: [
-      { type: 'heal', amount: 5, target: 'self' },
-    ],
     levels: [
       {
         description: '回復 5 點生命。',
-        effects: [{ type: 'heal', amount: 5, target: 'self' }],
+        effects: [{ type: EffectType.HEAL, amount: 5, target: 'self' }],
       },
       {
         description: '回復 10 點生命。',
-        effects: [{ type: 'heal', amount: 10, target: 'self' }],
+        effects: [{ type: EffectType.HEAL, amount: 10, target: 'self' }],
       },
       {
         description: '回復 15 點生命。',
-        effects: [{ type: 'heal', amount: 15, target: 'self' }],
+        effects: [{ type: EffectType.HEAL, amount: 15, target: 'self' }],
       },
     ],
   },
@@ -45,21 +43,11 @@ export const SKILLS = createCatalog([
     lootWeight: 100,
     lootTags: ['ruins'],
     cost: 2,
-    description: '下一次拉霸造成攻擊傷害時，傷害變為2倍。',
-    effects: [
-      {
-        type: 'apply-status',
-        statusId: 'power-strike-ready',
-        target: 'self',
-        chance: 1,
-        potency: 2,
-      },
-    ],
     levels: [
       {
         description: '下一次拉霸造成攻擊傷害時，傷害變為2倍。',
         effects: [{
-          type: 'apply-status',
+          type: EffectType.APPLY_STATUS,
           statusId: 'power-strike-ready',
           target: 'self',
           chance: 1,
@@ -69,7 +57,7 @@ export const SKILLS = createCatalog([
       {
         description: '下一次拉霸造成攻擊傷害時，傷害變為3倍。',
         effects: [{
-          type: 'apply-status',
+          type: EffectType.APPLY_STATUS,
           statusId: 'power-strike-ready',
           target: 'self',
           chance: 1,
@@ -79,7 +67,7 @@ export const SKILLS = createCatalog([
       {
         description: '下一次拉霸造成攻擊傷害時，傷害變為4倍。',
         effects: [{
-          type: 'apply-status',
+          type: EffectType.APPLY_STATUS,
           statusId: 'power-strike-ready',
           target: 'self',
           chance: 1,
@@ -98,22 +86,11 @@ export const SKILLS = createCatalog([
     lootWeight: 100,
     lootTags: ['ruins'],
     cost: 2,
-    description: '獲得火焰附加狀態，拉霸造成攻擊傷害時額外造成 1 點傷害，持續 3 回合。',
-    effects: [
-      {
-        type: 'apply-status',
-        statusId: 'fire-imbue',
-        target: 'self',
-        chance: 1,
-        duration: 3,
-        potency: 1,
-      },
-    ],
     levels: [
       {
         description: '獲得火焰附加狀態，拉霸造成攻擊傷害時額外造成 1 點傷害，持續 3 回合。',
         effects: [{
-          type: 'apply-status',
+          type: EffectType.APPLY_STATUS,
           statusId: 'fire-imbue',
           target: 'self',
           chance: 1,
@@ -124,7 +101,7 @@ export const SKILLS = createCatalog([
       {
         description: '獲得火焰附加狀態，拉霸造成攻擊傷害時額外造成 2 點傷害，持續 3 回合。',
         effects: [{
-          type: 'apply-status',
+          type: EffectType.APPLY_STATUS,
           statusId: 'fire-imbue',
           target: 'self',
           chance: 1,
@@ -135,7 +112,7 @@ export const SKILLS = createCatalog([
       {
         description: '獲得火焰附加狀態，拉霸造成攻擊傷害時額外造成 3 點傷害，持續 3 回合。',
         effects: [{
-          type: 'apply-status',
+          type: EffectType.APPLY_STATUS,
           statusId: 'fire-imbue',
           target: 'self',
           chance: 1,
@@ -154,15 +131,11 @@ export const SKILLS = createCatalog([
     lootEligible: true,
     lootWeight: 100,
     lootTags: ['ruins'],
-    description: '受到傷害時，每消耗1點✨可抵擋1點傷害。',
-    passiveEffects: [{
-      type: PassiveSkillEffectType.MANA_ARMOR,
-      damagePerMana: 1,
-    }],
     levels: [
       {
         description: '受到傷害時，每消耗1點✨可抵擋1點傷害。',
         passiveEffects: [{
+          trigger: PassiveSkillTrigger.BEFORE_DAMAGE_TAKEN,
           type: PassiveSkillEffectType.MANA_ARMOR,
           damagePerMana: 1,
         }],
@@ -170,6 +143,7 @@ export const SKILLS = createCatalog([
       {
         description: '受到傷害時，每消耗1點✨可抵擋2點傷害。',
         passiveEffects: [{
+          trigger: PassiveSkillTrigger.BEFORE_DAMAGE_TAKEN,
           type: PassiveSkillEffectType.MANA_ARMOR,
           damagePerMana: 2,
         }],
@@ -177,6 +151,7 @@ export const SKILLS = createCatalog([
       {
         description: '受到傷害時，每消耗1點✨可抵擋3點傷害。',
         passiveEffects: [{
+          trigger: PassiveSkillTrigger.BEFORE_DAMAGE_TAKEN,
           type: PassiveSkillEffectType.MANA_ARMOR,
           damagePerMana: 3,
         }],
@@ -193,25 +168,13 @@ export const SKILLS = createCatalog([
     lootWeight: 100,
     lootTags: ['ruins'],
     cost: 3,
-    description: '立即造成 5 點傷害，並有 60% 機率附加 3 層燃燒狀態。',
-    effects: [
-      { type: 'damage', element: 'fire', amount: 5, target: 'enemy' },
-      {
-        type: 'apply-status',
-        statusId: 'burning',
-        target: 'enemy',
-        chance: 0.6,
-        stacks: 3,
-        potency: 1,
-      },
-    ],
     levels: [
       {
         description: '立即造成 5 點傷害，並有 60% 機率附加 3 層燃燒狀態。',
         effects: [
-          { type: 'damage', element: 'fire', amount: 5, target: 'enemy' },
+          { type: EffectType.DAMAGE, element: 'fire', amount: 5, target: 'enemy' },
           {
-            type: 'apply-status',
+            type: EffectType.APPLY_STATUS,
             statusId: 'burning',
             target: 'enemy',
             chance: 0.6,
@@ -223,9 +186,9 @@ export const SKILLS = createCatalog([
       {
         description: '立即造成 5 點傷害，並有 60% 機率附加 4 層燃燒狀態。',
         effects: [
-          { type: 'damage', element: 'fire', amount: 5, target: 'enemy' },
+          { type: EffectType.DAMAGE, element: 'fire', amount: 5, target: 'enemy' },
           {
-            type: 'apply-status',
+            type: EffectType.APPLY_STATUS,
             statusId: 'burning',
             target: 'enemy',
             chance: 0.6,
@@ -237,9 +200,9 @@ export const SKILLS = createCatalog([
       {
         description: '立即造成 5 點傷害，並有 60% 機率附加 5 層燃燒狀態。',
         effects: [
-          { type: 'damage', element: 'fire', amount: 5, target: 'enemy' },
+          { type: EffectType.DAMAGE, element: 'fire', amount: 5, target: 'enemy' },
           {
-            type: 'apply-status',
+            type: EffectType.APPLY_STATUS,
             statusId: 'burning',
             target: 'enemy',
             chance: 0.6,
@@ -249,6 +212,121 @@ export const SKILLS = createCatalog([
         ],
       },
     ],
+  },
+  {
+    id: 'shield-block',
+    name: '盾牌格檔',
+    emoji: '🛡️',
+    rarity: ContentRarity.COMMON,
+    activation: SkillActivation.ACTIVE,
+    lootEligible: true,
+    lootWeight: 100,
+    lootTags: ['ruins'],
+    cost: 1,
+    levels: [2, 4, 6].map((amount) => ({
+      description: `立即獲得 ${amount} 點🛡️。`,
+      effects: [{
+        type: EffectType.GAIN_RESOURCE,
+        resource: 'armor',
+        amount,
+        target: 'self',
+      }],
+    })),
+  },
+  {
+    id: 'flame-cover',
+    name: '烈火罩',
+    emoji: '🔥',
+    rarity: ContentRarity.RARE,
+    activation: SkillActivation.ACTIVE,
+    lootEligible: true,
+    lootWeight: 100,
+    lootTags: ['ruins'],
+    cost: 2,
+    levels: [1, 2, 3].map((potency) => ({
+      description: `立即獲得 ${potency * 2} 點🛡️，並受到敵人攻擊時給予 ${potency} 層燃燒狀態。`,
+      effects: [
+        {
+          type: EffectType.GAIN_RESOURCE,
+          resource: 'armor',
+          amount: potency * 2,
+          target: 'self',
+        },
+        {
+          type: EffectType.APPLY_STATUS,
+          statusId: 'flame-cover',
+          target: 'self',
+          chance: 1,
+          potency,
+        },
+      ],
+    })),
+  },
+  {
+    id: 'shield-throw',
+    name: '盾牌投擲',
+    emoji: '🛡️',
+    rarity: ContentRarity.RARE,
+    activation: SkillActivation.ACTIVE,
+    lootEligible: true,
+    lootWeight: 100,
+    lootTags: ['ruins'],
+    cost: 1,
+    levels: [1, 2, 3].map((potency) => ({
+      description: `下次拉霸出現🛡️時，該次拉霸取得的護甲將對敵人造成護甲值＋${potency * 3}點傷害。`,
+      effects: [{
+        type: EffectType.APPLY_STATUS,
+        statusId: 'shield-throw-ready',
+        target: 'self',
+        chance: 1,
+        potency,
+      }],
+    })),
+  },
+  {
+    id: 'shield-bash',
+    name: '盾牌猛擊',
+    emoji: '💥',
+    rarity: ContentRarity.LEGENDARY,
+    activation: SkillActivation.ACTIVE,
+    lootEligible: true,
+    lootWeight: 100,
+    lootTags: ['ruins'],
+    cost: 2,
+    levels: [1, 2, 3].map((multiplier) => ({
+      description: `對敵人造成目前🛡️ ${multiplier}倍的傷害，造成傷害後扣除一半的🛡️。`,
+      effects: [{
+        type: EffectType.DAMAGE_FROM_RESOURCE,
+        resource: 'armor',
+        multiplier,
+        consumeRatio: 0.5,
+        minimumResource: 1,
+        element: 'physical',
+        target: 'enemy',
+      }],
+    })),
+  },
+  {
+    id: 'holy-shield',
+    name: '聖盾術',
+    emoji: '✨',
+    rarity: ContentRarity.LEGENDARY,
+    activation: SkillActivation.ACTIVE,
+    lootEligible: true,
+    lootWeight: 100,
+    lootTags: ['ruins'],
+    levels: [5, 4, 3].map((cost) => ({
+      cost,
+      description: '3回合內，大幅提升拉霸出現🛡️的機率並降低⚔️機率。',
+      effects: [{
+        type: EffectType.APPLY_STATUS,
+        statusId: 'holy-shield',
+        target: 'self',
+        chance: 1,
+        duration: 3,
+        potency: 1,
+      }],
+    })),
   },
 ], '技能庫');
 
@@ -264,27 +342,41 @@ export function getSkillMaxLevel(skillId, globalMaximum = Infinity) {
 
 export function getSkillLevelDefinition(skillId, level = 1) {
   const skill = getSkill(skillId);
-  const definitions = skill.levels?.length
-    ? skill.levels
-    : [{
-      description: skill.description,
-      effects: skill.effects ?? [],
-      passiveEffects: skill.passiveEffects ?? [],
-    }];
+  const definitions = skill.levels ?? [];
   if (!Number.isInteger(level) || level < 1 || level > definitions.length) {
     throw new RangeError(`${skill.name}沒有 Lv.${level} 的資料`);
   }
   return definitions[level - 1];
 }
 
-export function skillActivation(skillOrId) {
-  const skill = typeof skillOrId === 'string' ? getSkill(skillOrId) : skillOrId;
-  return skill.activation ?? SkillActivation.ACTIVE;
+/**
+ * 技能文字與效果都以 levels 為唯一來源，避免 Lv.1 在最外層再維護一次。
+ * 清單介面沒有玩家等級時，一律顯示 Lv.1 說明。
+ */
+export function skillDescription(skillOrId, level = 1) {
+  const skillId = typeof skillOrId === 'string' ? skillOrId : skillOrId.id;
+  return getSkillLevelDefinition(skillId, level).description;
 }
 
-export function skillUsageLabel(skillOrId) {
+export function skillActivation(skillOrId) {
+  const skill = typeof skillOrId === 'string' ? getSkill(skillOrId) : skillOrId;
+  return skill.activation;
+}
+
+export function skillCost(skillOrId, level = 1) {
+  const skill = typeof skillOrId === 'string' ? getSkill(skillOrId) : skillOrId;
+  if (skillActivation(skill) === SkillActivation.PASSIVE) return null;
+  const definition = getSkillLevelDefinition(skill.id, level);
+  const cost = definition.cost ?? skill.cost;
+  if (!Number.isInteger(cost) || cost < 0) {
+    throw new RangeError(`${skill.name} Lv.${level} 的法力成本必須是非負整數`);
+  }
+  return cost;
+}
+
+export function skillUsageLabel(skillOrId, level = 1) {
   const skill = typeof skillOrId === 'string' ? getSkill(skillOrId) : skillOrId;
   return skillActivation(skill) === SkillActivation.PASSIVE
     ? '被動技能'
-    : `${skill.cost} 法力`;
+    : `${skillCost(skill, level)} 法力`;
 }

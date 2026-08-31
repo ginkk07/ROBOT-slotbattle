@@ -1,25 +1,39 @@
 import { createConfig } from './config.js';
 import { contentTypeEmoji } from './data/content-types.js';
+import {
+  DAMAGE_SOURCES,
+  DamageSource,
+} from './data/damage-sources.js';
 import { getEvent } from './data/events.js';
+import { EffectType } from './data/effect-types.js';
 import { ItemEffectTrigger, ItemEffectType } from './data/item-effects.js';
 import { getItem } from './data/items.js';
 import { getRegion } from './data/regions.js';
-import { SkillActivation } from './data/skill-effects.js';
+import {
+  PassiveSkillTrigger,
+  SkillActivation,
+} from './data/skill-effects.js';
 import {
   getSkill,
   getSkillLevelDefinition,
   skillActivation,
+  skillCost,
 } from './data/skills.js';
-import { getStatus } from './data/statuses.js';
+import {
+  StatusEffectType,
+  StatusTrigger,
+  getStatus,
+} from './data/statuses.js';
 import { getUnit, UnitRank } from './data/units.js';
 import {
   createAdventureProgress,
   drawNextAdventureNode,
   scaleEnemyUnit,
 } from './engines/adventure-engine.js';
-import { applyEffects } from './engines/effects.js';
+import { applyEffects, damageAfterMitigation } from './engines/effects.js';
 import { drawEncounter } from './engines/encounter-engine.js';
 import {
+  afterEnemyAttackEquipmentDamageRequests,
   afterSpinEquipmentBonuses,
   applyTriggeredEquipmentEffects,
   equipItem,
@@ -30,27 +44,36 @@ import {
   healingResourceBonus,
   minimumEliteEncounterChance,
   normalizeEquipmentIds,
-  preservesTurnResource,
   promotesSymbolsWithLucky,
   reduceIncomingDamageWithEquipment,
   resourceGainAmount,
   spinDamageModifiers,
+  turnResourceRetentionRatio,
 } from './engines/equipment-engine.js';
 import { resolveEvent } from './engines/event-engine.js';
 import { rollRewardChoices } from './engines/loot-engine.js';
 import { selectMonsterIntent } from './engines/monster-action-engine.js';
-import { resolveManaArmor } from './engines/passive-skill-engine.js';
+import { resolvePassiveSkillEffects } from './engines/passive-skill-engine.js';
 import {
   grantSkillReward,
   forgetSkill,
   normalizePlayerSkills,
   playerSkillLevel,
 } from './engines/skill-progression.js';
-import { mergeActiveStatus } from './engines/status-engine.js';
+import {
+  advanceStatusDurations,
+  attackStatusBonuses,
+  consumeResourceGainDamageStatuses,
+  consumeSpinDamageMultiplierStatuses,
+  hasSymbolChanceModifiers,
+  mergeActiveStatus,
+  resolveAfterEnemyAttackStatuses,
+  symbolChancesWithStatuses,
+} from './engines/status-engine.js';
 import { randomInteger } from './engines/weighted-random.js';
-import { drawReels } from './random.js';
+import { drawReels, resolveSymbolChances } from './random.js';
 import { scoreSpin } from './scoring.js';
-import { SYMBOL_META } from './symbols.js';
+import { SYMBOL_META, SymbolId } from './symbols.js';
 
 export const GAME_STATE_VERSION = 5;
 
@@ -170,10 +193,16 @@ export function placeBet(
     throw new RangeError(`本次只能投入 1～${next.resources.action} 點行動點`);
   }
 
-  const symbolChances = {
+  const fixedSymbolChances = {
     ...equipmentSymbolChances(next.player),
     ...next.combatModifiers.nextSpinSymbolChances,
   };
+  const symbolChances = hasSymbolChanceModifiers(next.player)
+    ? symbolChancesWithStatuses(
+      next.player,
+      resolveSymbolChances(fixedSymbolChances),
+    )
+    : fixedSymbolChances;
   const spinReels = reels ?? drawReels(rng, symbolChances);
   // 「下一次拉霸」效果在抽牌後立即清除，三個💀也不會保留。
   next.combatModifiers.nextSpinSymbolChances = {};
@@ -212,9 +241,9 @@ export function placeBet(
     ? attackStatusBonuses(next.player)
     : { attackPower: 0, additionalDamage: 0 };
   const multiplierResult = hasAttackReward
-    ? consumeSpinDamageMultiplier(next.player)
-    : { player: next.player, multiplier: 1 };
-  next.player = multiplierResult.player;
+    ? consumeSpinDamageMultiplierStatuses(next.player)
+    : { unit: next.player, multiplier: 1 };
+  next.player = multiplierResult.unit;
   const damageModifiers = spinDamageModifiers(next.player, {
     wager,
     actionLimit: playerActionLimit(next),
@@ -234,14 +263,18 @@ export function placeBet(
     ) * multiplierResult.multiplier
     + afterSpin.bonusDamage
   ) * damageModifiers.multiplier);
-  const attackEvent = dealDamageToEnemy(next, requestedAttack, 'physical');
-  let attackDamage = attackEvent?.amount ?? 0;
+  const attackEvent = dealDamageToEnemy(
+    next,
+    requestedAttack,
+    'physical',
+    DamageSource.SPIN,
+  );
+  const spinDamage = attackEvent?.amount ?? 0;
 
   const flameSword = resolveAfterSpinDamageEquipment(next, {
-    spinDamage: attackDamage,
+    spinDamage,
     rng: chanceRng,
   });
-  attackDamage += flameSword.damage;
 
   const armorGained = resourceGainAmount(
     next.player,
@@ -259,8 +292,40 @@ export function placeBet(
     playerActionLimit(next),
     next.resources.action + afterSpin.resources.action,
   );
+
+  const resourceDamageResult = consumeResourceGainDamageStatuses(
+    next.player,
+    {
+      reels: outcome.reels,
+      resourceGains: { armor: armorGained, mana: manaGained },
+    },
+  );
+  next.player = resourceDamageResult.unit;
+  let resourceStatusDamage = 0;
+  const resourceStatusEvents = [...resourceDamageResult.events];
+  for (const request of resourceDamageResult.requests) {
+    const damageEvent = dealDamageToEnemy(
+      next,
+      request.amount,
+      request.element,
+      DamageSource.SKILL,
+    );
+    if (!damageEvent) continue;
+    resourceStatusDamage += damageEvent.amount;
+    resourceStatusEvents.push({
+      ...damageEvent,
+      statusId: request.statusId,
+      resource: request.resource,
+      resourceAmount: request.resourceAmount,
+    });
+  }
+
+  const skillDamage = flameSword.damage + resourceStatusDamage;
+  const attackDamage = spinDamage + skillDamage;
   next.lastImpact = {
     attackDamage,
+    spinDamage,
+    skillDamage,
     armorGained,
     manaGained,
     equipmentBonus: attackEquipmentBonus + afterSpin.bonusDamage + flameSword.damage,
@@ -272,6 +337,7 @@ export function placeBet(
     ...afterSpin.events,
     ...flameSword.events,
   ];
+  next.history.at(-1).statusEvents = resourceStatusEvents;
 
   if (next.enemy.hp === 0) awaitCombatVictoryConfirmation(next);
   return next;
@@ -295,11 +361,9 @@ export function activateSkill(
   }
   const skillLevel = playerSkillLevel(next.player, skillId);
   const levelDefinition = getSkillLevelDefinition(skillId, skillLevel);
-  if (!Number.isInteger(skill.cost) || skill.cost < 0) {
-    throw new Error(`技能 ${skill.name} 尚未設定法力消耗`);
-  }
-  if (next.resources.mana < skill.cost) {
-    throw new RangeError(`${skill.name}需要 ${skill.cost} 點法力`);
+  const cost = skillCost(skill, skillLevel);
+  if (next.resources.mana < cost) {
+    throw new RangeError(`${skill.name}需要 ${cost} 點法力`);
   }
   if (wouldOnlyHealFullHealth({ effects: levelDefinition.effects }, next.player)) {
     throw new Error('生命已全滿，現在不需要治療');
@@ -307,12 +371,18 @@ export function activateSkill(
   if (wouldOnlyRefreshActiveStatus(levelDefinition.effects, next.player)) {
     throw new Error('這個效果目前仍在持續中');
   }
+  const resourceReason = effectResourceBlockReason(
+    levelDefinition.effects,
+    next.resources,
+  );
+  if (resourceReason) throw new Error(resourceReason);
 
   const events = applyPlayerEffects(next, {
     effects: levelDefinition.effects,
+    damageSource: DamageSource.SKILL,
     rng,
   });
-  next.resources.mana -= skill.cost;
+  next.resources.mana -= cost;
   next.lastAction = {
     type: 'skill',
     id: skill.id,
@@ -323,6 +393,7 @@ export function activateSkill(
     round: next.round,
     skillId: skill.id,
     skillLevel,
+    cost,
     events,
   });
 
@@ -353,6 +424,7 @@ export function useItem(
 
   const events = applyPlayerEffects(next, {
     effects: item.effects,
+    damageSource: DamageSource.ITEM,
     rng,
   });
   events.push(...applyCombatItemEffects(next, item));
@@ -402,7 +474,10 @@ export function endPlayerTurn(
 
   const wasStunned = isStunned(next);
   const discardedAction = next.resources.action;
-  const playerTurnEndStatus = resolveTriggeredStatuses(next.player, 'turn-end');
+  const playerTurnEndStatus = resolveTriggeredStatuses(
+    next.player,
+    StatusTrigger.TURN_END,
+  );
   next.player = advanceStatusDurations(playerTurnEndStatus.unit);
   const turnEndHealingEvents = applyHealingEquipmentBonus(
     next,
@@ -424,28 +499,46 @@ export function endPlayerTurn(
     return next;
   }
 
-  const enemyTurnStartStatus = resolveTriggeredStatuses(next.enemy, 'turn-start');
+  const enemyTurnStartStatus = resolveTriggeredStatuses(
+    next.enemy,
+    StatusTrigger.TURN_START,
+  );
   next.enemy = enemyTurnStartStatus.unit;
   if (next.enemy.hp === 0) {
     awaitCombatVictoryConfirmation(next);
     return next;
   }
 
+  const resolvedRound = next.round;
   const intent = next.enemy.intent ?? selectMonsterIntent(next.enemy, { rng: monsterRng });
   const armorUsed = wasStunned ? 0 : Math.min(next.resources.armor, intent.damage);
+  next.resources.armor = Math.max(0, next.resources.armor - armorUsed);
   const incomingAfterArmor = Math.max(0, intent.damage - armorUsed);
   const reducedIncomingDamage = reduceIncomingDamageWithEquipment(
     next.player,
     incomingAfterArmor,
   );
-  const manaArmor = resolveManaArmor(next.player, {
-    damage: reducedIncomingDamage,
-    mana: next.resources.mana,
-  });
-  next.resources.mana -= manaArmor.manaSpent;
+  const manaBeforePassiveSkills = next.resources.mana;
+  const passiveSkillResolution = resolvePassiveSkillEffects(
+    next.player,
+    PassiveSkillTrigger.BEFORE_DAMAGE_TAKEN,
+    {
+      damage: reducedIncomingDamage,
+      resources: next.resources,
+    },
+  );
+  next.resources = passiveSkillResolution.context.resources;
+  const passiveDamageBlocked = Math.max(
+    0,
+    reducedIncomingDamage - passiveSkillResolution.context.damage,
+  );
+  const passiveManaSpent = Math.max(
+    0,
+    manaBeforePassiveSkills - next.resources.mana,
+  );
   const damageTaken = Math.min(
     next.player.hp,
-    manaArmor.damage,
+    passiveSkillResolution.context.damage,
   );
   next.player.hp -= damageTaken;
 
@@ -455,6 +548,7 @@ export function endPlayerTurn(
       effects: intent.effects,
       source: next.enemy,
       target: next.player,
+      damageSource: DamageSource.SKILL,
       rng: monsterRng,
     });
     next.enemy = result.source;
@@ -462,14 +556,43 @@ export function endPlayerTurn(
     monsterEffectEvents = result.events;
   }
 
+  const reactiveStatusResult = resolveAfterEnemyAttackStatuses(
+    next.player,
+    next.enemy,
+    { rng: monsterRng },
+  );
+  next.player = reactiveStatusResult.holder;
+  next.enemy = reactiveStatusResult.attacker;
+
+  const afterEnemyAttackEquipmentEvents = [];
+  for (const request of afterEnemyAttackEquipmentDamageRequests(
+    next.player,
+    { armor: armorUsed },
+  )) {
+    const damageEvent = dealDamageToEnemy(
+      next,
+      request.amount,
+      request.element,
+      DamageSource.EQUIPMENT,
+    );
+    if (!damageEvent) continue;
+    afterEnemyAttackEquipmentEvents.push({
+      ...damageEvent,
+      itemId: request.itemId,
+      resource: request.resource,
+      resourceSpent: request.spent,
+    });
+  }
+
   const enemyTurnEndStatus = next.enemy.hp > 0
-    ? resolveTriggeredStatuses(next.enemy, 'turn-end')
+    ? resolveTriggeredStatuses(next.enemy, StatusTrigger.TURN_END)
     : { unit: next.enemy, events: [] };
   next.enemy = advanceStatusDurations(enemyTurnEndStatus.unit);
   const discardedResources = clearTurnResources(next, {
     preserveBetweenTurns: true,
   });
   const discardedMana = discardedResources.mana;
+  const retainedArmor = next.resources.armor;
   next.stunned = false;
 
   if (next.player.hp === 0) {
@@ -477,25 +600,36 @@ export function endPlayerTurn(
     return next;
   }
 
-  next.round += 1;
-  next.phase = GamePhase.PLAYER_TURN;
-  next.combatModifiers.damageDealtThisTurn = 0;
-  next.resources.action = playerActionLimit(next);
-  const playerTurnStartStatus = resolveTriggeredStatuses(next.player, 'turn-start');
-  next.player = playerTurnStartStatus.unit;
-  const turnStartHealingEvents = applyHealingEquipmentBonus(
-    next,
-    playerTurnStartStatus.events,
-  );
-  const playerTurnStartEquipmentEvents = applyPlayerTurnStartEquipmentEffects(next);
-  next.enemy.intent = selectMonsterIntent(next.enemy, { rng: monsterRng });
+  const enemyDefeatedByReaction = next.enemy.hp === 0;
+  let playerTurnStartStatus = { unit: next.player, events: [] };
+  let turnStartHealingEvents = [];
+  let playerTurnStartEquipmentEvents = [];
+  if (!enemyDefeatedByReaction) {
+    next.round += 1;
+    next.phase = GamePhase.PLAYER_TURN;
+    next.combatModifiers.damageDealtThisTurn = 0;
+    next.combatModifiers.damageDealtBySource = createDamageSourceTotals();
+    next.resources.action = playerActionLimit(next);
+    playerTurnStartStatus = resolveTriggeredStatuses(
+      next.player,
+      StatusTrigger.TURN_START,
+    );
+    next.player = playerTurnStartStatus.unit;
+    turnStartHealingEvents = applyHealingEquipmentBonus(
+      next,
+      playerTurnStartStatus.events,
+    );
+    playerTurnStartEquipmentEvents = applyPlayerTurnStartEquipmentEffects(next);
+    next.enemy.intent = selectMonsterIntent(next.enemy, { rng: monsterRng });
+  }
 
   next.lastResolution = {
-    round: next.round - 1,
+    round: resolvedRound,
     stunned: wasStunned,
     discardedAction,
     discardedMana,
     armorUsed,
+    retainedArmor,
     enemyAction: {
       type: intent.type,
       name: intent.name,
@@ -503,21 +637,29 @@ export function endPlayerTurn(
     },
     enemyAttack: intent.damage,
     bossAttack: intent.damage,
-    manaArmorBlocked: manaArmor.blocked,
-    manaSpent: manaArmor.manaSpent,
+    passiveSkillEvents: passiveSkillResolution.events,
+    passiveDamageBlocked,
+    passiveManaSpent,
+    // 保留既有欄位，讓舊存檔／外部紀錄仍可讀；戰鬥流程已不辨識魔力護甲。
+    manaArmorBlocked: passiveDamageBlocked,
+    manaSpent: passiveManaSpent,
     damageTaken,
     monsterEffectEvents,
+    afterEnemyAttackStatusEvents: reactiveStatusResult.events,
+    afterEnemyAttackEquipmentEvents,
     enemyStatusEvents: [
       ...enemyTurnStartStatus.events,
       ...enemyTurnEndStatus.events,
     ],
     playerStatusEvents: [
       ...playerTurnEndStatus.events,
+      ...reactiveStatusResult.events,
       ...playerTurnStartStatus.events,
     ],
     playerEquipmentEvents: [
       ...turnEndHealingEvents,
       ...playerTurnEndEquipmentEvents,
+      ...afterEnemyAttackEquipmentEvents,
       ...turnStartHealingEvents,
       ...playerTurnStartEquipmentEvents,
     ],
@@ -526,6 +668,7 @@ export function endPlayerTurn(
     type: 'turn-resolution',
     ...structuredClone(next.lastResolution),
   });
+  if (enemyDefeatedByReaction) awaitCombatVictoryConfirmation(next);
   return next;
 }
 
@@ -813,6 +956,12 @@ function awaitCombatVictoryConfirmation(state) {
   state.enemy.intent = null;
   clearTurnResources(state);
   state.stunned = false;
+
+  const region = getRegion(state.adventure.regionId);
+  const shouldRestoreHp = state.enemy.rank === UnitRank.BOSS
+    && region.encounterRules.boss.restorePlayerHpAfterVictory;
+  // BOSS 勝利回復是地區規則，不視為一般治療事件，因此不觸發頌缽等治療裝備。
+  if (shouldRestoreHp) state.player.hp = state.player.maxHp;
 }
 
 function finishCombatVictory(state, { rewardRng }) {
@@ -973,16 +1122,28 @@ function applyPlayerTurnStartEquipmentEffects(state) {
  * 玩家技能、消耗品共用的效果入口。所有玩家造成的傷害與治療觸發裝備
  * 都從這裡記錄，避免新增技能時漏掉夏賜儀碇或頌缽的判定。
  */
-function applyPlayerEffects(state, { effects = [], rng } = {}) {
+function applyPlayerEffects(
+  state,
+  { effects = [], damageSource = null, rng } = {},
+) {
   if (effects.length === 0) return [];
   const result = applyEffects({
     effects,
     source: state.player,
     target: state.enemy,
+    resources: state.resources,
+    resourceGainResolver: (resource, amount) => resourceGainAmount(
+      state.player,
+      resource,
+      amount,
+    ),
+    resourceMaximums: { action: playerActionLimit(state) },
+    damageSource,
     rng,
   });
   state.player = result.source;
   state.enemy = result.target;
+  state.resources = result.resources;
   recordDamageEvents(state, result.events);
   return [
     ...result.events,
@@ -1058,12 +1219,13 @@ function applyCombatItemEffects(state, item) {
   return events;
 }
 
-function dealDamageToEnemy(state, amount, element) {
+function dealDamageToEnemy(state, amount, element, damageSource) {
   if (!Number.isFinite(amount) || amount <= 0 || state.enemy?.hp <= 0) return null;
   const result = applyEffects({
     effects: [{ type: 'damage', element, amount, target: 'enemy' }],
     source: state.player,
     target: state.enemy,
+    damageSource,
   });
   state.player = result.source;
   state.enemy = result.target;
@@ -1100,7 +1262,13 @@ function resolveAfterSpinDamageEquipment(state, { spinDamage, rng }) {
 
     const stacks = state.enemy.activeStatuses
       ?.find((status) => status.statusId === effect.statusId)?.stacks ?? 0;
-    const damageEvent = dealDamageToEnemy(state, stacks, effect.element);
+    // 燃焰之劍由拉霸傷害觸發，但追加的燃燒層數傷害屬於技能傷害。
+    const damageEvent = dealDamageToEnemy(
+      state,
+      stacks,
+      effect.element,
+      DamageSource.SKILL,
+    );
     if (damageEvent) {
       damage += damageEvent.amount;
       events.push({ ...damageEvent, itemId });
@@ -1121,7 +1289,12 @@ function resolvePlayerTurnEndEquipment(state) {
     ItemEffectType.DAMAGE_FROM_RESOURCE,
   )) {
     const amount = Number(state.resources[effect.resource] ?? 0);
-    const damageEvent = dealDamageToEnemy(state, amount, effect.element);
+    const damageEvent = dealDamageToEnemy(
+      state,
+      amount,
+      effect.element,
+      DamageSource.EQUIPMENT,
+    );
     if (damageEvent) events.push({ ...damageEvent, itemId });
   }
 
@@ -1160,10 +1333,15 @@ function resolvePlayerTurnEndEquipment(state) {
 }
 
 function recordDamageEvents(state, events) {
-  const amount = events
-    .filter((event) => event.type === 'damage' && event.target === 'enemy')
-    .reduce((sum, event) => sum + event.amount, 0);
-  state.combatModifiers.damageDealtThisTurn += amount;
+  for (const event of events) {
+    if (event.type !== 'damage' || event.target !== 'enemy') continue;
+    state.combatModifiers.damageDealtThisTurn += event.amount;
+    if (!event.damageSource) continue;
+    const previous = Number(
+      state.combatModifiers.damageDealtBySource[event.damageSource] ?? 0,
+    );
+    state.combatModifiers.damageDealtBySource[event.damageSource] = previous + event.amount;
+  }
 }
 
 function playerActionLimit(state) {
@@ -1179,28 +1357,16 @@ function createCombatModifiers() {
     actionLimitBonus: 0,
     // 只計玩家在目前回合實際對敵人造成的傷害。
     damageDealtThisTurn: 0,
+    // 保留相同總傷害，另外依來源分組，讓限定拉霸／技能傷害的效果
+    // 不需要回頭猜測是哪一條流程產生傷害。
+    damageDealtBySource: createDamageSourceTotals(),
     // 磨刀石等「下一次拉霸」消耗品暫存在此，抽牌後立刻清空。
     nextSpinSymbolChances: {},
   };
 }
 
-function attackStatusBonuses(player) {
-  return (player.activeStatuses ?? []).reduce((bonuses, active) => {
-    const definition = getStatus(active.statusId);
-    const isAttackTrigger = definition.trigger === 'on-attack'
-      && definition.effect.type === 'bonus-damage';
-    const isAttackModifier = definition.effect.type === 'modify-stat'
-      && definition.effect.stat === 'attack';
-    if (!isAttackTrigger && !isAttackModifier) return bonuses;
-    const amount = (
-      Number(definition.effect.amountPerPotency ?? 0)
-      * Number(active.potency ?? 1)
-      * Number(active.stacks ?? 1)
-    );
-    if (isAttackModifier) bonuses.attackPower += amount;
-    if (isAttackTrigger) bonuses.additionalDamage += amount;
-    return bonuses;
-  }, { attackPower: 0, additionalDamage: 0 });
+function createDamageSourceTotals() {
+  return Object.fromEntries(DAMAGE_SOURCES.map((source) => [source, 0]));
 }
 
 function itemActionCost(item) {
@@ -1221,27 +1387,29 @@ function resolveTriggeredStatuses(unit, trigger) {
       * Number(active.potency ?? 1)
       * Number(active.stacks ?? 1);
 
-    if (definition.effect.type === 'damage') {
-      const resistance = Math.min(
-        1,
-        Math.max(0, Number(next.damageResistances?.[definition.effect.element] ?? 0)),
+    if (definition.effect.type === StatusEffectType.DAMAGE) {
+      const mitigation = damageAfterMitigation(
+        requested,
+        next,
+        definition.effect.element,
       );
       const amount = Math.min(
         next.hp,
-        requested <= 0 || resistance >= 1
-          ? 0
-          : Math.max(1, Math.floor(requested * (1 - resistance))),
+        mitigation.amount,
       );
       next.hp -= amount;
       events.push({
         type: 'damage',
+        damageSource: DamageSource.STATUS,
         statusId: active.statusId,
         amount,
+        resistance: mitigation.resistance,
+        damageReduction: mitigation.damageReduction,
         element: definition.effect.element,
       });
     }
 
-    if (definition.effect.type === 'heal') {
+    if (definition.effect.type === StatusEffectType.HEAL) {
       const amount = Math.min(next.maxHp - next.hp, requested);
       next.hp += amount;
       events.push({ type: 'heal', statusId: active.statusId, amount });
@@ -1259,30 +1427,22 @@ function resolveTriggeredStatuses(unit, trigger) {
   return { unit: next, events };
 }
 
-function advanceStatusDurations(unit) {
-  const next = structuredClone(unit);
-  next.activeStatuses = (next.activeStatuses ?? [])
-    .map((status) => {
-      const definition = getStatus(status.statusId);
-      if (definition.durationMode === 'until-consumed') return status;
-      if (definition.stacking.mode === 'stack-countdown') return status;
-      return { ...status, remainingTurns: Number(status.remainingTurns) - 1 };
-    })
-    .filter((status) => {
-      const definition = getStatus(status.statusId);
-      if (definition.durationMode === 'until-consumed') return true;
-      if (definition.stacking.mode === 'stack-countdown') {
-        return Number(status.stacks ?? 0) > 0;
-      }
-      return status.remainingTurns > 0;
-    });
-  return next;
-}
-
 function wouldOnlyHealFullHealth(source, player) {
   return source.effects?.length > 0
     && source.effects.every((effect) => effect.type === 'heal' && effect.target === 'self')
     && player.hp >= player.maxHp;
+}
+
+function effectResourceBlockReason(effects = [], resources = {}) {
+  for (const effect of effects) {
+    if (effect.type !== EffectType.DAMAGE_FROM_RESOURCE) continue;
+    const minimum = Number(effect.minimumResource ?? 0);
+    if (Number(resources[effect.resource] ?? 0) >= minimum) continue;
+    const label = { action: '❇️', armor: '🛡️', mana: '✨' }[effect.resource]
+      ?? effect.resource;
+    return `至少需要 ${minimum} 點${label}`;
+  }
+  return null;
 }
 
 function wouldOnlyRefreshActiveStatus(effects, player) {
@@ -1322,7 +1482,10 @@ function summarizeEffectEvents(events) {
     if (event.type === 'apply-status' && event.applied) {
       const status = getStatus(event.statusId);
       if (status.durationMode === 'until-consumed') {
-        return [`獲得${status.name}（下次拉霸傷害 ×${event.potency}）`];
+        if (status.effect.type === StatusEffectType.MULTIPLY_SPIN_DAMAGE) {
+          return [`獲得${status.name}（下次拉霸傷害 ×${event.potency}）`];
+        }
+        return [`獲得${status.name}`];
       }
       const stackText = event.stacks > 1 ? `${event.stacks}層` : '';
       return [`附加${stackText}${status.name}`];
@@ -1347,6 +1510,8 @@ function spinActionText(impact) {
 function emptyImpact() {
   return {
     attackDamage: 0,
+    spinDamage: 0,
+    skillDamage: 0,
     armorGained: 0,
     manaGained: 0,
     equipmentBonus: 0,
@@ -1355,28 +1520,19 @@ function emptyImpact() {
   };
 }
 
-function consumeSpinDamageMultiplier(player) {
-  const next = structuredClone(player);
-  const index = (next.activeStatuses ?? [])
-    .findIndex((active) => active.statusId === 'power-strike-ready');
-  if (index < 0) return { player: next, multiplier: 1 };
-  const active = next.activeStatuses[index];
-  const multiplier = Math.max(1, Number(active.potency ?? 1));
-  next.activeStatuses.splice(index, 1);
-  return { player: next, multiplier };
-}
-
 function clearTurnResources(
   state,
   { preserveBetweenTurns = false } = {},
 ) {
   const discarded = { action: 0, armor: 0, mana: 0 };
   for (const resource of Object.keys(discarded)) {
-    const preserve = preserveBetweenTurns
-      && preservesTurnResource(state.player, resource);
-    if (preserve) continue;
-    discarded[resource] = Number(state.resources[resource] ?? 0);
-    state.resources[resource] = 0;
+    const current = Number(state.resources[resource] ?? 0);
+    const ratio = preserveBetweenTurns
+      ? turnResourceRetentionRatio(state.player, resource)
+      : 0;
+    const retained = Math.floor(current * ratio);
+    discarded[resource] = current - retained;
+    state.resources[resource] = retained;
   }
   return discarded;
 }
@@ -1410,11 +1566,19 @@ function ensureCurrentFields(state) {
   state.combatModifiers = {
     ...createCombatModifiers(),
     ...(state.combatModifiers ?? {}),
+    damageDealtBySource: {
+      ...createDamageSourceTotals(),
+      ...(state.combatModifiers?.damageDealtBySource ?? {}),
+    },
     nextSpinSymbolChances: {
       ...(state.combatModifiers?.nextSpinSymbolChances ?? {}),
     },
   };
   state.rewardChoices ??= [];
+  if (state.lastImpact) {
+    state.lastImpact.spinDamage ??= state.lastImpact.attackDamage ?? 0;
+    state.lastImpact.skillDamage ??= 0;
+  }
   state.endSummary ??= null;
   state.stunned = isStunned(state);
   if (state.event) {
@@ -1509,6 +1673,8 @@ function upgradeLegacyState(legacy) {
     next.enemy.hp -= damage;
     next.lastImpact = {
       attackDamage: damage,
+      spinDamage: damage,
+      skillDamage: 0,
       armorGained: 0,
       manaGained: 0,
       equipmentBonus: 0,

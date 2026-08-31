@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
+import { DamageSource } from '../src/game/data/damage-sources.js';
 import {
   createGame,
   endPlayerTurn,
@@ -39,7 +40,7 @@ function battle(itemIds = [], {
 }
 
 test('新增道具完整收錄，且多件裝備會同時持有與生效', () => {
-  assert.equal(Object.keys(ITEMS).length, 24);
+  assert.equal(Object.keys(ITEMS).length, 27);
 
   const state = battle(['sword', 'iron-shield', 'vip-membership']);
   assert.deepEqual(state.player.equipment, [
@@ -80,7 +81,7 @@ test('符文魔方與星星法杖每次拉霸最多各觸發一次', () => {
   state = placeBet(state, 1, { reels: [DEFENSE, DEFENSE, SKILL] });
 
   assert.equal(state.lastImpact.attackDamage, 4);
-  assert.equal(state.resources.armor, 8);
+  assert.equal(state.resources.armor, 7);
   assert.equal(state.resources.mana, 1);
 });
 
@@ -112,7 +113,8 @@ test('懸賞令、頌缽與平安符在各自時機生效', () => {
   });
   assert.equal(bounty.resources.armor, 20);
   bounty = placeBet(bounty, 1, { reels: [ATTACK, DEFENSE, SKILL] });
-  assert.equal(bounty.lastImpact.attackDamage, 4);
+  // 1點牌面傷害＋懸賞令攻擊力3，之後由菁英的護甲強化降低20%。
+  assert.equal(bounty.lastImpact.attackDamage, 3);
 
   let bowl = battle(['singing-bowl', 'healing-potion']);
   bowl.player.hp = 30;
@@ -179,6 +181,15 @@ test('傳說燃焰之劍在拉霸造成傷害後加燃燒並依目前層數追�
     chanceRng: zero,
   });
   assert.equal(state.lastImpact.attackDamage, 2);
+  assert.equal(state.lastImpact.spinDamage, 1);
+  assert.equal(state.lastImpact.skillDamage, 1);
+  assert.equal(state.combatModifiers.damageDealtBySource.spin, 1);
+  assert.equal(state.combatModifiers.damageDealtBySource.skill, 1);
+  assert.equal(
+    state.history.at(-1).equipmentEvents.find((event) => event.type === 'damage')
+      .damageSource,
+    DamageSource.SKILL,
+  );
   assert.equal(state.enemy.activeStatuses[0].stacks, 1);
 
   state = placeBet(state, 1, {
@@ -186,6 +197,10 @@ test('傳說燃焰之劍在拉霸造成傷害後加燃燒並依目前層數追�
     chanceRng: zero,
   });
   assert.equal(state.lastImpact.attackDamage, 3);
+  assert.equal(state.lastImpact.spinDamage, 1);
+  assert.equal(state.lastImpact.skillDamage, 2);
+  assert.equal(state.combatModifiers.damageDealtBySource.spin, 2);
+  assert.equal(state.combatModifiers.damageDealtBySource.skill, 3);
   assert.equal(state.enemy.activeStatuses[0].stacks, 2);
 });
 

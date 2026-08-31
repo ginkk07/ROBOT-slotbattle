@@ -1,11 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
+import { DamageSource } from '../src/game/data/damage-sources.js';
 import { getItem } from '../src/game/data/items.js';
-import { getSkill } from '../src/game/data/skills.js';
+import { PassiveSkillTrigger } from '../src/game/data/skill-effects.js';
+import { getSkillLevelDefinition } from '../src/game/data/skills.js';
 import { createGame } from '../src/game/engine.js';
 import { applyEffects } from '../src/game/engines/effects.js';
+import { resolvePassiveSkillEffects } from '../src/game/engines/passive-skill-engine.js';
 import {
+  consumeSpinDamageMultiplierStatuses,
   mergeActiveStatus,
   resolveStatusApplication,
 } from '../src/game/engines/status-engine.js';
@@ -24,7 +28,7 @@ test('技能與道具使用同一套治療效果處理器', () => {
   state.player.hp = 40;
 
   const result = applyEffects({
-    effects: getSkill('life-recovery').effects,
+    effects: getSkillLevelDefinition('life-recovery', 1).effects,
     source: state.player,
     target: state.enemy,
   });
@@ -35,21 +39,79 @@ test('技能與道具使用同一套治療效果處理器', () => {
   assert.equal(state.player.hp, 40);
 });
 
-test('火焰炸彈會計算Boss火焰抗性並附加3層燃燒', () => {
+test('被動技能由觸發時機與處理器註冊表統一結算', () => {
+  const result = resolvePassiveSkillEffects(
+    {
+      skillIds: ['mana-armor'],
+      skillLevels: { 'mana-armor': 2 },
+    },
+    PassiveSkillTrigger.BEFORE_DAMAGE_TAKEN,
+    {
+      damage: 5,
+      resources: { action: 0, armor: 0, mana: 2 },
+    },
+  );
+
+  assert.equal(result.context.damage, 1);
+  assert.equal(result.context.resources.mana, 0);
+  assert.equal(result.events[0].skillId, 'mana-armor');
+  assert.equal(result.events[0].blocked, 4);
+});
+
+test('下一次拉霸倍率依狀態機制定義結算，不由戰鬥流程辨識技能ID', () => {
+  const result = consumeSpinDamageMultiplierStatuses({
+    activeStatuses: [{
+      statusId: 'power-strike-ready',
+      sourceUnitId: 'player',
+      remainingTurns: null,
+      stacks: 1,
+      potency: 3,
+    }],
+  });
+
+  assert.equal(result.multiplier, 3);
+  assert.equal(result.events[0].effectType, 'multiply-spin-damage');
+  assert.deepEqual(result.unit.activeStatuses, []);
+});
+
+test('Boss護甲強化會降低火焰炸彈傷害並附加3層燃燒', () => {
   const state = game();
   const result = applyEffects({
     effects: getItem('fire-bomb').effects,
     source: state.player,
     target: state.enemy,
+    damageSource: DamageSource.ITEM,
     rng: () => 0,
   });
 
   assert.equal(result.target.hp, 54);
-  assert.equal(result.events[0].resistance, 0.25);
-  assert.equal(result.target.activeStatuses[0].statusId, 'burning');
-  assert.equal(result.target.activeStatuses[0].stacks, 3);
-  assert.equal(result.target.activeStatuses[0].remainingTurns, 3);
-  assert.equal(result.target.activeStatuses[0].potency, 1);
+  assert.equal(result.events[0].resistance, 0);
+  assert.ok(Math.abs(result.events[0].damageReduction - 0.2) < 1e-12);
+  const burning = result.target.activeStatuses.find((status) => (
+    status.statusId === 'burning'
+  ));
+  assert.equal(burning.stacks, 3);
+  assert.equal(burning.remainingTurns, 3);
+  assert.equal(burning.potency, 1);
+});
+
+test('護甲強化狀態使強化遺跡哨兵受到的傷害降低20%', () => {
+  const state = createGame({
+    id: 'armor-reinforcement-test',
+    ownerId: 'player-1',
+    config: { initialEnemyUnitId: 'elite-ruins-sentinel' },
+    monsterRng: () => 0,
+  });
+  const result = applyEffects({
+    effects: [{ type: 'damage', element: 'physical', amount: 10, target: 'enemy' }],
+    source: state.player,
+    target: state.enemy,
+    damageSource: DamageSource.SPIN,
+  });
+
+  assert.equal(result.events[0].resistance, 0);
+  assert.ok(Math.abs(result.events[0].damageReduction - 0.2) < 1e-12);
+  assert.equal(result.events[0].amount, 8);
 });
 
 test('單位自己的狀態覆寫優先於狀態庫Boss規則', () => {
