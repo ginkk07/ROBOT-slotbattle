@@ -286,6 +286,20 @@ test('戰鬥勝利先顯示敵人生命0與確認按鈕，確認後才顯示獎�
   assert.equal(payload.embeds[0].fields.length, 3);
   assert.equal(payload.components[0].components.length, 3);
   assert.match(payload.embeds[0].fields[0].name, /【普通】/);
+  for (const field of payload.embeds[0].fields) {
+    assert.doesNotMatch(field.name, /^\d+\.\s/);
+  }
+  for (const component of payload.components[0].components) {
+    assert.doesNotMatch(component.label, /^\d+\.\s/);
+  }
+  assert.deepEqual(
+    payload.components[0].components.map((component) => component.custom_id),
+    [
+      'slotbattle:reward-render-test:reward:0',
+      'slotbattle:reward-render-test:reward:1',
+      'slotbattle:reward-render-test:reward:2',
+    ],
+  );
 });
 
 test('擊敗地區BOSS時顯示HP已回滿', () => {

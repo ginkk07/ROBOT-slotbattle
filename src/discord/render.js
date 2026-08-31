@@ -207,10 +207,10 @@ function renderRewardChoice(state) {
       ])],
     };
   }
-  const fields = state.rewardChoices.map((choice, index) => {
+  const fields = state.rewardChoices.map((choice) => {
     const content = rewardContent(choice);
     return {
-      name: `${index + 1}. 【${rarityLabel(choice.rarity)}】${rewardName(choice, content)}`,
+      name: `【${rarityLabel(choice.rarity)}】${rewardName(choice, content)}`,
       value: rewardDescription(choice, content),
       inline: false,
     };
@@ -226,7 +226,7 @@ function renderRewardChoice(state) {
     components: [
       actionRow(state.rewardChoices.map((choice, index) => button({
         customId: gameCustomId(state.id, 'reward', String(index)),
-        label: `${index + 1}. ${rewardName(choice, rewardContent(choice))}`,
+        label: rewardName(choice, rewardContent(choice)),
         emoji: contentTypeEmoji(
           choice.contentType === 'skill' ? 'skill' : rewardContent(choice).type,
         ),
