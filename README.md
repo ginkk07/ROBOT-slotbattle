@@ -18,7 +18,7 @@
 - 玩家可在多次拉霸之間使用技能或消耗品；取得的裝備可同時持有，並在各自觸發時機自動生效。
 - 戰鬥面板以按鈕列出技能與消耗品，裝備集中在一個選單；點擊後會開啟私人詳情卡。內容可用時才顯示「使用」，否則只顯示「關閉」。
 - 回合資源使用 `❇️`、`🛡️`、`✨` 與數值表示，不重複顯示欄位名稱。
-- 玩家按下「回合結束」後敵人才會執行已預告的行動；未使用的行動點、護甲與法力不保留。
+- 玩家按下「回合結束」後敵人才會執行已預告的行動；回合資源預設不保留，指定裝備可按資料規則保留部分資源。
 
 玩家版 `/slotbattle rules` 維持精簡操作說明；完整數值與流程記錄在 [`docs/combat-v2.md`](docs/combat-v2.md)，新增或調整內容時請依照 [`docs/content-management.md`](docs/content-management.md)。
 
@@ -31,7 +31,7 @@
 3. **菁英怪**：Boss 與奇遇都未發生時，基礎機率為 12%；此機率保存在地區資料，可由未來內容調整。
 4. **普通怪**：其餘情況進入普通戰鬥。
 
-擊敗 Boss 並選完獎勵後會前往下一地區。本次冒險的地區深度每增加 1，敵人的基礎生命與基礎傷害線性增加 20%；怪物技能數量、技能倍率、施放機率與其他規則不變。
+擊敗 Boss 時玩家 HP 會立即回滿，選完獎勵後前往下一地區。本次冒險的地區深度每增加 1，敵人的基礎生命與基礎傷害線性增加 20%；怪物技能數量、技能倍率、施放機率與其他規則不變。
 
 怪物會先判定普通攻擊或技能，再從持有技能中等機率選擇一個：
 
@@ -40,6 +40,8 @@
 | 普通 | 60% | 40% | 1 |
 | 菁英 | 40% | 60% | 2 |
 | Boss | 20% | 80% | 3 |
+
+被動怪物技能不列入上述回合技能數，也不會被抽選成行動。強化遺跡哨兵與遺跡守衛都會以「護甲強化」狀態進入戰鬥，使受到的傷害降低 20%，Discord 敵人狀態列只顯示技能狀態名稱。怪物不再具有毒抗性或火焰抗性。
 
 ## 獎勵與稀有度
 
@@ -61,7 +63,7 @@
 
 ## 目前玩家技能與道具
 
-玩家最多持有 3 個技能，技能等級上限為 3。重複取得持有且未滿級的技能會升級；滿級技能不再進入獎勵池。
+玩家最多持有 3 個技能，技能等級上限為 3；沒有升級數值的技能可以只定義 1 級。重複取得持有且未滿級的技能會升級；滿級技能不再進入獎勵池。
 開局時可從普通裝備「劍、幸運草、手裡劍」中選擇 1 件；生命藥水與火焰炸彈仍可在冒險途中取得。
 
 | 類型 | 稀有度 | 名稱 | 成本 | Lv.1／Lv.2／Lv.3 效果 |
@@ -71,14 +73,21 @@
 | 技能 | 稀有 | 火焰附加 | 2 法力 | 拉霸造成攻擊傷害時額外造成 1／2／3 點傷害，持續 3 回合。 |
 | 技能 | 稀有 | 魔力護甲 | 被動技能 | 受到傷害時，每消耗 1 點法力抵擋 1／2／3 點傷害。 |
 | 技能 | 傳說 | 火焰衝擊 | 3 法力 | 立即造成 5 點傷害，60% 機率附加 3／4／5 層燃燒。 |
+| 技能 | 普通 | 盾牌格檔 | 1 法力 | 立即獲得 2／4／6 點護甲。 |
+| 技能 | 稀有 | 烈火罩 | 2 法力 | 立即獲得 2／4／6 點護甲；受到敵人攻擊時，賦予敵人 1／2／3 層燃燒。 |
+| 技能 | 稀有 | 盾牌投擲 | 1 法力 | 下次拉霸出現🛡️時，該次拉霸取得的護甲會對敵人造成護甲值＋3／6／9點傷害。 |
+| 技能 | 傳說 | 盾牌猛擊 | 2 法力 | 造成目前護甲 1／2／3 倍傷害，之後失去一半護甲。 |
+| 技能 | 傳說 | 聖盾術 | 5／4／3 法力 | 3 回合內，大幅提升🛡️出現機率並降低⚔️出現機率。 |
 | 裝備 | 普通 | 劍 | 自動生效 | 戰鬥開始時獲得攻擊力＋1，持續 3 回合。 |
 | 裝備 | 普通 | 幸運草 | 自動生效 | 🍀牌面機率提升為 10%。 |
 | 裝備 | 普通 | 可頌麵包 | 自動生效 | 回合開始時回復 1 點生命。 |
 | 裝備 | 普通 | 紅鬼面具 | 自動生效 | 菁英遭遇率最低提升為 20%。 |
 | 裝備 | 普通 | 鐵盾 | 自動生效 | 回合開始時獲得 5 點護甲。 |
+| 裝備 | 普通 | 荊棘 | 自動生效 | 敵人攻擊消耗護甲時，對敵人造成等同消耗護甲的傷害。 |
+| 裝備 | 普通 | 魔石 | 自動生效 | 回合開始時獲得 1 點法力。 |
 | 裝備 | 普通 | 手裡劍 | 自動生效 | 拉霸造成攻擊傷害時額外傷害＋1。 |
 | 裝備 | 普通 | 賭徒左手 | 自動生效 | 全額投入目前行動點上限時，本次拉霸傷害 ×2。 |
-| 裝備 | 稀有 | 符文魔方 | 自動生效 | 拉霸出現🛡️時，每次拉霸額外獲得 5 點護甲。 |
+| 裝備 | 稀有 | 符文魔方 | 自動生效 | 拉霸出現🛡️時，每次拉霸額外獲得 4 點護甲。 |
 | 裝備 | 稀有 | 幸運幣 | 自動生效 | 投入 5 點時有 77% 機率補充 1 點行動點。 |
 | 裝備 | 稀有 | 星星法杖 | 自動生效 | 拉霸出現✨時，每次拉霸額外造成 4 點傷害。 |
 | 裝備 | 稀有 | 懸賞令 | 自動生效 | 菁英或 Boss 戰第 1 回合獲得 20 點護甲、攻擊力＋3。 |
@@ -88,8 +97,9 @@
 | 裝備 | 稀有 | 詛咒蛇麟 | 自動生效 | 敵人行動結束後保留剩餘法力，但無法獲得護甲。 |
 | 裝備 | 傳說 | VIP會員 | 自動生效 | 每回合行動點上限＋1。 |
 | 裝備 | 傳說 | 星海羅盤 | 自動生效 | 回合結束時造成等同剩餘法力的傷害。 |
-| 裝備 | 傳說 | 燃焰之劍 | 自動生效 | 拉霸造成傷害後使燃燒＋1，再造成等同目前燃燒層數的傷害。 |
+| 裝備 | 傳說 | 燃焰之劍 | 自動生效 | 拉霸造成傷害後使燃燒＋1，再造成等同目前燃燒層數的技能傷害。 |
 | 裝備 | 傳說 | 夏賜儀碇 | 自動生效 | 星海羅盤結算後判定：零傷害回合使本場行動點上限＋1，最多＋5；造成傷害時清除累積。 |
+| 裝備 | 傳說 | 金剛石 | 自動生效 | 回合開始時保留上一回合一半的剩餘護甲。 |
 | 消耗品 | 普通 | 生命藥水 | 0 行動點 | 回復 10 點生命。 |
 | 消耗品 | 普通 | 磨刀石 | 0 行動點 | 下一次拉霸的⚔️牌面機率提升為 50%，之後失效。 |
 | 消耗品 | 普通 | 堅硬藥劑 | 0 行動點 | 立即獲得 20 點護甲。 |
@@ -97,6 +107,166 @@
 | 消耗品 | 稀有 | 火焰炸彈 | 0 行動點 | 造成 8 點傷害，並附加 3 層燃燒狀態。 |
 
 法力與行動點成本是獨立欄位，不寫入效果文字。消耗品目前使用後會扣除 1 個物品，但不消耗行動點；`actionCost` 欄位已保留，未來可逐項調整。所有取得的裝備會同時生效，不使用裝備部位互相替換。
+
+護甲流的內部結算規則：盾牌投擲使用該次拉霸最終實際取得的護甲，包含符文魔方一次追加的 4 點，再加上技能等級提供的 3／6／9 點基礎傷害；造成技能傷害後仍保留護甲。盾牌猛擊先依施放前護甲計算技能傷害，再留下向下取整的一半護甲。烈火罩在敵人完成下一次普通攻擊或怪物技能攻擊後附加燃燒並消失，即使攻擊被護甲完全抵擋也會觸發。聖盾術實際增加 25 個百分點的🛡️機率並降低 25 個百分點的⚔️機率。荊棘造成裝備傷害；金剛石只保留敵人攻擊結算後的剩餘護甲，奇數向下取整。
+
+## 如何新增技能（模組化）
+
+玩家與怪物都只保存一份 `skillIds`。主動或被動由技能資料的 `activation` 決定，主戰鬥流程不會依技能 ID 寫個別判定；兩者的內容庫分開，避免玩家等級與怪物行動規則互相污染。
+
+### 先判斷要修改哪個模組
+
+| 新技能需求 | 要修改的位置 | 不需要修改 |
+|---|---|---|
+| 使用既有的治療、傷害、套用／移除狀態 | `src/game/data/skills.js` | `engine.js`、`effects.js` |
+| 套用一個新的狀態，但使用既有狀態機制 | `skills.js`、`statuses.js` | `engine.js` |
+| 使用既有被動效果類型 | `skills.js` | `engine.js`、`passive-skill-engine.js` |
+| 全新的主動效果機制 | `skills.js`，並在 `engines/effects.js` 登記一個處理器 | `engine.js` |
+| 全新的被動觸發／效果機制 | `skills.js`、`data/skill-effects.js`，並在 `engines/passive-skill-engine.js` 登記一個處理器 | `engine.js` |
+
+### 1. 在 `skills.js` 建立技能
+
+每個技能的最外層只放身分、稀有度、使用方式、掉落資料與各等級共用的主動技能成本。說明及效果只放在 `levels`，Lv.1 不可在最外層再複製一次。若成本會隨等級改變，改在每個 `levels[]` 設定 `cost`；介面、可用性與實際扣除都會讀取目前等級。
+
+```js
+{
+  id: 'example-heal',
+  name: '範例治療',
+  emoji: '💚',
+  rarity: ContentRarity.COMMON,
+  activation: SkillActivation.ACTIVE,
+  lootEligible: true,
+  lootWeight: 100,
+  lootTags: ['ruins'],
+  cost: 3,
+  levels: [
+    {
+      description: '回復 4 點生命。',
+      effects: [{ type: 'heal', amount: 4, target: 'self' }],
+    },
+    {
+      description: '回復 8 點生命。',
+      effects: [{ type: 'heal', amount: 8, target: 'self' }],
+    },
+    {
+      description: '回復 12 點生命。',
+      effects: [{ type: 'heal', amount: 12, target: 'self' }],
+    },
+  ],
+}
+```
+
+現有主動效果可直接組合：
+
+- `heal`：治療；設定 `amount`、`target`。
+- `damage`：傷害；設定 `amount`、`element`、`target`。
+- `gain-resource`：立即取得行動點、護甲或法力；設定 `resource`、`amount`、`target`。
+- `damage-from-resource`：依目前資源造成傷害並按比例消耗資源；設定 `resource`、`multiplier`、`consumeRatio`、`element`、`target`。
+- `apply-status`：套用狀態；設定 `statusId`、`target`，並視需要設定 `chance`、`duration`、`stacks`、`potency`。
+- `remove-status`：移除指定狀態；設定 `statusId`、`target`。
+
+這些效果由 `engines/effects.js` 的共用處理器執行，技能啟用流程只負責檢查持有、等級、法力與可用性。
+
+傷害事件另以 `DamageSource` 區分 `spin`、`skill`、`item`、`equipment`、`status`，不要用元素或觸發時機推測來源。例如燃焰之劍雖然由拉霸傷害觸發，但它追加的燃燒層數傷害屬於 `skill`；拉霸本體才屬於 `spin`。
+
+### 2. 技能需要新狀態時
+
+先在 `src/game/data/statuses.js` 建立狀態，再由技能等級的 `apply-status` 引用。狀態行為由 `trigger`、`durationMode`、`stacking` 與 `effect` 決定，不可在 `engine.js` 搜尋特定 `statusId`。
+
+例如強擊使用：
+
+```js
+{
+  trigger: StatusTrigger.NEXT_SPIN_ATTACK,
+  durationMode: 'until-consumed',
+  effect: {
+    type: StatusEffectType.MULTIPLY_SPIN_DAMAGE,
+    amountPerPotency: 1,
+  },
+}
+```
+
+任何技能只要套用同一種觸發／效果機制，都會自動由 `status-engine.js` 結算。若狀態需要全新的結算方式，才在該模組新增共用處理器，仍不可依技能 ID 判斷。
+
+### 3. 新增被動技能
+
+被動技能不設定 `cost`，每個等級改放 `passiveEffects`，而且每個效果都必須同時指定 `trigger` 與 `type`：
+
+```js
+{
+  id: 'example-mana-guard',
+  name: '範例魔力防護',
+  emoji: '✨',
+  rarity: ContentRarity.RARE,
+  activation: SkillActivation.PASSIVE,
+  lootEligible: true,
+  lootWeight: 100,
+  lootTags: ['ruins'],
+  levels: [1, 2, 3].map((damagePerMana) => ({
+    description: `每點✨抵擋 ${damagePerMana} 點傷害。`,
+    passiveEffects: [{
+      trigger: PassiveSkillTrigger.BEFORE_DAMAGE_TAKEN,
+      type: PassiveSkillEffectType.MANA_ARMOR,
+      damagePerMana,
+    }],
+  })),
+}
+```
+
+如果是全新的被動機制：
+
+1. 在 `src/game/data/skill-effects.js` 新增 `PassiveSkillTrigger`（需要新時機時）與 `PassiveSkillEffectType`。
+2. 在 `src/game/engines/passive-skill-engine.js` 實作處理器，登記到 `PASSIVE_SKILL_EFFECT_HANDLERS`。
+3. 處理器只接收同類效果與戰鬥 `context`，回傳更新後的 `context` 及事件；不要直接修改原始玩家或戰鬥狀態。
+4. 在技能的三個 `levels` 引用該 `trigger` 與 `type`。
+5. 在 `src/game/data/validate.js` 補上新欄位的數值驗證，並新增處理器與整場戰鬥測試。
+
+主流程固定只呼叫 `resolvePassiveSkillEffects()`；新增被動技能時不得在 `engine.js` 加入技能名稱或技能 ID 分支。
+
+### 4. 解鎖、掉落與固定檢查
+
+- `lootEligible: true` 的技能會依 `rarity`、`lootWeight`、`lootTags` 進入符合條件的戰鬥獎勵池。
+- 要成為預設開局技能，將 ID 加入 `src/game/data/player-progression.js`。
+- 要由成就解鎖，將 ID 寫入 `src/game/data/achievements.js`。
+- 技能 ID 一旦進入存檔就不可直接改名；真的要改時必須新增存檔升級規則。
+
+修改後至少確認資料驗證、技能三個等級、主動／被動執行、獎勵升級與 Discord 詳情卡。完整指令如下：
+
+```bash
+npm test
+npm run validate-data
+npm run simulate -- 100
+npm run worker:check
+```
+
+### 5. 新增怪物技能
+
+怪物技能放在 `src/game/data/monster-skills.js`，不要加入玩家的 `skills.js`。主動技能以 `power` 設定本次攻擊相對於怪物基礎傷害的倍率，額外狀態仍使用共用 `effects`：
+
+```js
+{
+  id: 'example-monster-strike',
+  name: '範例重擊',
+  activation: MonsterSkillActivation.ACTIVE,
+  power: 1.5,
+  effects: [{
+    type: 'apply-status',
+    statusId: 'stunned',
+    target: 'enemy',
+    chance: 0.25,
+  }],
+}
+```
+
+怪物被動技能同樣放在 `monster-skills.js`，但使用 `MonsterSkillActivation.PASSIVE`。現有被動模式是在戰鬥建立時套用共用效果，例如「護甲強化」套用一個戰鬥常駐狀態；它不會被抽成回合行動。
+
+建立後只要把技能 ID 加到 `src/game/data/units.js` 對應怪物的 `skillIds`：
+
+- 不可另建 `passiveSkillIds` 或在 Boss 流程複製同一效果。
+- `adventure-engine.js` 會在建立敵人時執行其中的被動技能。
+- `monster-action-engine.js` 只會從其中的主動技能抽選。
+- `monster-actions.js` 的階級技能數只計算主動技能；普通／菁英／Boss 目前分別必須持有 1／2／3 個主動技能。
+- 若使用既有共用效果，不需修改任何引擎；全新立即效果只在 `engines/effects.js` 的註冊表實作一次。
 
 ## 遊戲結束與永久資料
 
@@ -120,7 +290,8 @@
 | 玩家技能庫 | `src/game/data/skills.js` | 法力成本、Lv.1～3、稀有度、效果與掉落條件 |
 | 怪物技能庫 | `src/game/data/monster-skills.js` | 怪物技能倍率與額外效果，與玩家技能完全分離 |
 | 怪物行動規則 | `src/game/data/monster-actions.js` | 各階級普通攻擊率、技能率與技能數 |
-| 狀態庫 | `src/game/data/statuses.js` | 燃燒、暈眩、攻擊強化及抗性規則 |
+| 技能效果規格 | `src/game/data/skill-effects.js` | 主動／被動分類、被動觸發時機與效果類型 |
+| 狀態庫 | `src/game/data/statuses.js` | 狀態觸發、效果、持續時間、疊加及抗性規則 |
 | 道具庫 | `src/game/data/items.js` | 消耗品、裝備、稀有度與共用效果 |
 | 道具效果規格 | `src/game/data/item-effects.js` | 裝備觸發時機與可重用效果類型 |
 | 內容分類 ICON | `src/game/data/content-types.js` | 技能、裝備、消耗品三種介面圖示 |
@@ -178,7 +349,7 @@ npm run worker:check
 
 模擬器使用固定種子，讓相同版本的結果可以重現；預設每局最多 100 回合。深入平衡測試可自行指定，例如 `SLOT_SIM_SEED=123 SLOT_SIM_MAX_TURNS=500 npm run simulate -- 1000`。CI 只執行 100 局快速模擬，避免極少數高治療長局占滿檢查時間。
 
-測試涵蓋拉霸全部 125 種排列、自由投入 Modal、技能／道具私人詳情卡、四種玩家技能的三個等級、即時戰鬥、怪物行動、奇遇與 Boss 判定順序、獨立稀有度、區域成長、玩家／怪物技能分離、遊戲結算、成就冪等性、舊存檔升級與 D1 版本衝突。GitHub Actions 會在 Push 與 Pull Request 時自動執行測試、資料驗證、模擬及 Worker 打包。
+測試涵蓋拉霸全部 125 種排列、自由投入 Modal、技能／道具私人詳情卡、十種玩家技能及其有效等級、即時戰鬥、怪物行動、奇遇與 Boss 判定順序、獨立稀有度、區域成長、玩家／怪物技能分離、遊戲結算、成就冪等性、舊存檔升級與 D1 版本衝突。GitHub Actions 會在 Push 與 Pull Request 時自動執行測試、資料驗證、模擬及 Worker 打包。
 
 ## 尚待設計的內容
 

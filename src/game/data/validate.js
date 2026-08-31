@@ -1,22 +1,31 @@
 import { ACHIEVEMENTS } from './achievements.js';
 import { ENCOUNTER_TABLES } from './encounters.js';
+import { EFFECT_TYPES } from './effect-types.js';
 import { EVENT_RULES } from './event-rules.js';
 import { EVENTS } from './events.js';
 import { ITEMS } from './items.js';
 import { ITEM_EFFECT_TRIGGERS, ITEM_EFFECT_TYPES } from './item-effects.js';
 import { LOOT_TABLES } from './loot-tables.js';
 import { MONSTER_ACTION_RULES } from './monster-actions.js';
-import { MONSTER_SKILLS } from './monster-skills.js';
+import {
+  MONSTER_SKILLS,
+  MonsterSkillActivation,
+} from './monster-skills.js';
 import { PLAYER_PROGRESSION_RULES } from './player-progression.js';
 import { ContentRarity, EventRarity } from './rarities.js';
 import { REGIONS } from './regions.js';
 import {
   PASSIVE_SKILL_EFFECT_TYPES,
+  PASSIVE_SKILL_TRIGGERS,
   SKILL_ACTIVATIONS,
   SkillActivation,
 } from './skill-effects.js';
 import { SKILLS } from './skills.js';
-import { STATUSES } from './statuses.js';
+import {
+  STATUS_EFFECT_TYPES,
+  STATUS_TRIGGERS,
+  STATUSES,
+} from './statuses.js';
 import { UNITS } from './units.js';
 import { isSymbol } from '../symbols.js';
 
@@ -40,11 +49,54 @@ export function validateGameData() {
         ?.requiredSkillCount;
       if (expectedSkillCount === undefined) {
         errors.push(`單位 ${unit.id} 的怪物階級沒有行動規則：${unit.rank}`);
-      } else if (unit.skillIds.length !== expectedSkillCount) {
+      } else if (unit.skillIds.filter((skillId) => (
+        MONSTER_SKILLS[skillId]?.activation === MonsterSkillActivation.ACTIVE
+      )).length !== expectedSkillCount) {
         errors.push(`單位 ${unit.id} 必須有 ${expectedSkillCount} 個怪物技能`);
       }
       if (!Number.isFinite(unit.stats.attack) || unit.stats.attack <= 0) {
         errors.push(`單位 ${unit.id} 的基礎傷害必須大於0`);
+      }
+    }
+  }
+
+  for (const skill of Object.values(MONSTER_SKILLS)) {
+    if (!Object.values(MonsterSkillActivation).includes(skill.activation)) {
+      errors.push(`怪物技能 ${skill.id} 的 activation 不合法：${skill.activation}`);
+    }
+  }
+
+  for (const status of Object.values(STATUSES)) {
+    if (!STATUS_TRIGGERS.includes(status.trigger)) {
+      errors.push(`狀態 ${status.id} 的 trigger 不合法：${status.trigger}`);
+    }
+    if (!STATUS_EFFECT_TYPES.includes(status.effect?.type)) {
+      errors.push(`狀態 ${status.id} 的 effect.type 不合法：${status.effect?.type}`);
+    }
+    if (status.effect?.statusId !== undefined) {
+      checkReference(STATUSES, status.effect.statusId, `狀態 ${status.id} 的效果`, errors);
+    }
+    if (
+      status.effect?.requiresSymbolId !== undefined
+      && !isSymbol(status.effect.requiresSymbolId)
+    ) {
+      errors.push(`狀態 ${status.id} 指向不存在的觸發牌面`);
+    }
+    if (
+      status.effect?.resource !== undefined
+      && !['action', 'armor', 'mana'].includes(status.effect.resource)
+    ) {
+      errors.push(`狀態 ${status.id} 的資源類型不合法`);
+    }
+    if (status.effect?.chanceDeltas !== undefined) {
+      let total = 0;
+      for (const [symbolId, delta] of Object.entries(status.effect.chanceDeltas)) {
+        if (!isSymbol(symbolId)) errors.push(`狀態 ${status.id} 指向不存在的牌面`);
+        if (!Number.isFinite(delta)) errors.push(`狀態 ${status.id} 的牌面機率差值必須是數字`);
+        total += Number(delta);
+      }
+      if (Math.abs(total) > 1e-12) {
+        errors.push(`狀態 ${status.id} 的牌面機率差值總和必須為0`);
       }
     }
   }
@@ -61,11 +113,42 @@ export function validateGameData() {
       ...(source.levels ?? []).flatMap((level) => level.effects ?? []),
     ];
     for (const effect of effects) {
+      if (!EFFECT_TYPES.includes(effect.type)) {
+        errors.push(`${source.id} 的共用效果類型不合法：${effect.type}`);
+      }
       if (effect.statusId) {
         checkReference(STATUSES, effect.statusId, `${source.id} 的效果`, errors);
       }
       if (effect.stacks !== undefined && (!Number.isInteger(effect.stacks) || effect.stacks < 1)) {
         errors.push(`${source.id} 的效果 stacks 必須是正整數`);
+      }
+      if (
+        effect.resource !== undefined
+        && !['action', 'armor', 'mana'].includes(effect.resource)
+      ) {
+        errors.push(`${source.id} 的共用效果資源不合法：${effect.resource}`);
+      }
+      if (
+        effect.multiplier !== undefined
+        && (!Number.isFinite(effect.multiplier) || effect.multiplier < 0)
+      ) {
+        errors.push(`${source.id} 的共用效果 multiplier 必須是非負數`);
+      }
+      if (
+        effect.consumeRatio !== undefined
+        && (
+          !Number.isFinite(effect.consumeRatio)
+          || effect.consumeRatio < 0
+          || effect.consumeRatio > 1
+        )
+      ) {
+        errors.push(`${source.id} 的共用效果 consumeRatio 必須介於0與1`);
+      }
+      if (
+        effect.minimumResource !== undefined
+        && (!Number.isInteger(effect.minimumResource) || effect.minimumResource < 0)
+      ) {
+        errors.push(`${source.id} 的共用效果 minimumResource 必須是非負整數`);
       }
     }
     for (const skillId of source.passiveSkillIds ?? []) {
@@ -190,6 +273,9 @@ export function validateGameData() {
     if (!Number.isInteger(minimumBossProgress) || minimumBossProgress < 0) {
       errors.push(`地區 ${region.id} 的 Boss 最低遭遇數必須是非負整數`);
     }
+    if (typeof region.encounterRules?.boss?.restorePlayerHpAfterVictory !== 'boolean') {
+      errors.push(`地區 ${region.id} 的 Boss 勝利回滿生命設定必須是布林值`);
+    }
     if (typeof region.encounterRules?.event?.allowOnFirstEncounter !== 'boolean') {
       errors.push(`地區 ${region.id} 的 allowOnFirstEncounter 必須是布林值`);
     }
@@ -235,29 +321,40 @@ export function validateGameData() {
     errors.push('開局技能欄位不可多於冒險技能持有上限');
   }
   for (const skill of Object.values(SKILLS)) {
-    const activation = skill.activation ?? SkillActivation.ACTIVE;
+    const activation = skill.activation;
     if (!SKILL_ACTIVATIONS.includes(activation)) {
       errors.push(`技能 ${skill.id} 的 activation 不合法：${activation}`);
     }
     if (
       activation === SkillActivation.ACTIVE
+      && skill.cost !== undefined
       && (!Number.isInteger(skill.cost) || skill.cost < 0)
     ) {
-      errors.push(`主動技能 ${skill.id} 的 cost 必須是非負整數`);
+      errors.push(`主動技能 ${skill.id} 的共用 cost 必須是非負整數`);
     }
-    for (const effect of skill.passiveEffects ?? []) {
-      validatePassiveSkillEffect(skill.id, effect, errors);
+    for (const duplicatedField of ['description', 'effects', 'passiveEffects']) {
+      if (Object.hasOwn(skill, duplicatedField)) {
+        errors.push(
+          `技能 ${skill.id} 不可在最外層設定 ${duplicatedField}，請只維護 levels`,
+        );
+      }
     }
 
-    const levels = skill.levels?.length ?? 1;
-    if (levels !== PLAYER_PROGRESSION_RULES.maxSkillLevel) {
+    const levels = skill.levels?.length ?? 0;
+    if (levels < 1 || levels > PLAYER_PROGRESSION_RULES.maxSkillLevel) {
       errors.push(
-        `技能 ${skill.id} 必須定義 ${PLAYER_PROGRESSION_RULES.maxSkillLevel} 個等級`,
+        `技能 ${skill.id} 必須定義1～${PLAYER_PROGRESSION_RULES.maxSkillLevel}個等級`,
       );
     }
     for (const [index, level] of (skill.levels ?? []).entries()) {
       if (typeof level.description !== 'string' || !level.description.trim()) {
         errors.push(`技能 ${skill.id} 的 Lv.${index + 1} 缺少說明`);
+      }
+      if (activation === SkillActivation.ACTIVE) {
+        const cost = level.cost ?? skill.cost;
+        if (!Number.isInteger(cost) || cost < 0) {
+          errors.push(`主動技能 ${skill.id} 的 Lv.${index + 1} cost 必須是非負整數`);
+        }
       }
       const effects = activation === SkillActivation.PASSIVE
         ? level.passiveEffects
@@ -265,6 +362,18 @@ export function validateGameData() {
       if (!Array.isArray(effects) || effects.length === 0) {
         const label = activation === SkillActivation.PASSIVE ? '被動效果' : '效果';
         errors.push(`技能 ${skill.id} 的 Lv.${index + 1} 缺少${label}`);
+      }
+      if (
+        activation === SkillActivation.ACTIVE
+        && Object.hasOwn(level, 'passiveEffects')
+      ) {
+        errors.push(`主動技能 ${skill.id} 的 Lv.${index + 1} 不可設定 passiveEffects`);
+      }
+      if (
+        activation === SkillActivation.PASSIVE
+        && Object.hasOwn(level, 'effects')
+      ) {
+        errors.push(`被動技能 ${skill.id} 的 Lv.${index + 1} 不可設定 effects`);
       }
       for (const effect of level.passiveEffects ?? []) {
         validatePassiveSkillEffect(skill.id, effect, errors);
@@ -339,9 +448,24 @@ function validateItemEffect(itemId, effect, errors) {
   ) {
     errors.push(`道具 ${itemId} 的 resetOnDamage 必須是布林值`);
   }
+  if (
+    effect.ratio !== undefined
+    && (!Number.isFinite(effect.ratio) || effect.ratio < 0 || effect.ratio > 1)
+  ) {
+    errors.push(`道具 ${itemId} 的 ratio 必須介於0與1`);
+  }
+  if (
+    effect.multiplier !== undefined
+    && (!Number.isFinite(effect.multiplier) || effect.multiplier < 0)
+  ) {
+    errors.push(`道具 ${itemId} 的 multiplier 必須是非負數`);
+  }
 }
 
 function validatePassiveSkillEffect(skillId, effect, errors) {
+  if (!PASSIVE_SKILL_TRIGGERS.includes(effect.trigger)) {
+    errors.push(`技能 ${skillId} 的被動觸發時機不合法：${effect.trigger}`);
+  }
   if (!PASSIVE_SKILL_EFFECT_TYPES.includes(effect.type)) {
     errors.push(`技能 ${skillId} 的被動效果類型不合法：${effect.type}`);
   }

@@ -2,9 +2,11 @@ import { ACHIEVEMENTS } from '../game/data/achievements.js';
 import { contentTypeEmoji } from '../game/data/content-types.js';
 import { getItem } from '../game/data/items.js';
 import { rarityLabel } from '../game/data/rarities.js';
+import { getRegion } from '../game/data/regions.js';
 import {
   getSkill,
   getSkillLevelDefinition,
+  skillDescription,
   skillUsageLabel,
 } from '../game/data/skills.js';
 import { getStatus } from '../game/data/statuses.js';
@@ -68,7 +70,7 @@ export function renderProfile(profileRecord) {
         name: '目前技能',
         value: selectedSkills.length
           ? selectedSkills.map((skill) => (
-            `${contentTypeEmoji('skill')} **${skill.name}**｜${skillUsageLabel(skill)}\n${skill.description}`
+            `${contentTypeEmoji('skill')} **${skill.name}**｜${skillUsageLabel(skill)}\n${skillDescription(skill)}`
           )).join('\n')
           : '尚未選擇',
         inline: false,
@@ -388,7 +390,12 @@ function equipmentSelect(state, equipmentIds) {
 
 function combatDescription(state) {
   if (state.phase === GamePhase.VICTORY_CONFIRM) {
-    return `**戰鬥結果：** 已擊敗 ${state.enemy.name}，按下「確認」查看獎勵。`;
+    const region = getRegion(state.adventure.regionId);
+    const hpRecoveryText = state.enemy.rank === 'boss'
+      && region.encounterRules.boss.restorePlayerHpAfterVictory
+      ? '你的 HP 已回滿。'
+      : '';
+    return `**戰鬥結果：** 已擊敗 ${state.enemy.name}。${hpRecoveryText}按下「確認」查看獎勵。`;
   }
 
   const intent = getEnemyIntent(state);
@@ -413,7 +420,7 @@ function skillSelect(profile, selectedIds) {
       return {
         label: skill.name,
         value: id,
-        description: `${skillUsageLabel(skill)}｜${skill.description}`.slice(0, 100),
+        description: `${skillUsageLabel(skill)}｜${skillDescription(skill)}`.slice(0, 100),
         emoji: { name: contentTypeEmoji('skill') },
         default: selectedIds.includes(id),
       };
@@ -467,8 +474,14 @@ function statusListText(statuses) {
   if (!statuses?.length) return '無';
   return statuses.map((status) => {
     const definition = getStatus(status.statusId);
+    if (definition.durationMode === 'battle') {
+      return `${definition.emoji}${definition.name}`;
+    }
     if (definition.durationMode === 'until-consumed') {
-      return `${definition.emoji}${definition.name}（下次拉霸傷害 ×${status.potency}）`;
+      if (definition.effect.type === 'multiply-spin-damage') {
+        return `${definition.emoji}${definition.name}（下次拉霸傷害 ×${status.potency}）`;
+      }
+      return `${definition.emoji}${definition.name}`;
     }
     if (definition.stacking.mode === 'stack-countdown') {
       return `${definition.emoji}${definition.name} ×${status.stacks}`;
@@ -490,7 +503,7 @@ function rewardDescription(choice, content) {
     const acquisition = choice.acquisition === 'level-up'
       ? `技能升級｜Lv.${choice.currentLevel} → Lv.${choice.targetLevel}`
       : `新技能｜Lv.${choice.targetLevel ?? 1}`;
-    return `${acquisition}｜${skillUsageLabel(content)}\n${definition.description}`;
+    return `${acquisition}｜${skillUsageLabel(content, choice.targetLevel ?? 1)}\n${definition.description}`;
   }
   return `${itemTypeLabel(content)}\n${content.description}`;
 }

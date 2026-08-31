@@ -10,6 +10,7 @@ import {
 } from '../src/discord/render.js';
 import { renderContentDetail } from '../src/discord/content-detail.js';
 import {
+  activateSkill,
   abandonGame,
   confirmCombatVictory,
   createGame,
@@ -48,11 +49,11 @@ test('玩家資料頁可各選一個開局技能與道具', () => {
   assert.equal(payload.components[1].components[0].max_values, 1);
   assert.deepEqual(
     payload.components[0].components[0].options.map((option) => option.emoji.name),
-    ['📘', '📘', '📘'],
+    ['⚡', '⚡', '⚡'],
   );
   assert.deepEqual(
     payload.components[1].components[0].options.map((option) => option.emoji.name),
-    ['🎒', '🎒', '🎒'],
+    ['📦', '📦', '📦'],
   );
   assert.deepEqual(
     payload.components[1].components[0].options.map((option) => option.label),
@@ -116,7 +117,7 @@ test('裝備在面板顯示為已穿戴而不是使用按鈕', () => {
   assert.match(player.value, /玩家狀態[\s\S]*攻擊力＋1（3回合）/);
   assert.deepEqual(
     equipmentSelect.options.map((option) => [option.label, option.emoji.name]),
-    [['劍', '🎒']],
+    [['劍', '📦']],
   );
 });
 
@@ -135,6 +136,8 @@ test('拉霸結果只顯示實際傷害、護甲與法力', () => {
   let state = createGame({
     id: 'simple-spin-result',
     ownerId: 'player-1',
+    // 此案例只驗證顯示格式，固定使用沒有減傷狀態的普通怪避免隨機遭遇干擾。
+    config: { initialEnemyUnitId: 'ruins-sentinel' },
   });
   state.player.activeStatuses.push({
     statusId: 'power-strike-ready',
@@ -173,6 +176,43 @@ test('技能詳情依目前可用性顯示使用與關閉按鈕', () => {
     usable.components[0].components.map((component) => component.label),
     ['使用', '關閉'],
   );
+});
+
+test('聖盾術詳情依目前等級顯示5、4、3點法力成本', () => {
+  const state = createGame({
+    id: 'holy-shield-detail-test',
+    ownerId: 'player-1',
+    loadout: { skillIds: ['holy-shield'], itemIds: [] },
+  });
+  state.player.skillLevels['holy-shield'] = 3;
+  state.resources.mana = 2;
+
+  const unavailable = renderContentDetail(state, 'skill', 'holy-shield');
+  assert.equal(unavailable.embeds[0].fields[1].value, '3');
+  assert.match(unavailable.embeds[0].fields[3].value, /需要 3 點法力/);
+
+  state.resources.mana = 3;
+  const usable = renderContentDetail(state, 'skill', 'holy-shield');
+  assert.deepEqual(
+    usable.components[0].components.map((component) => component.label),
+    ['使用', '關閉'],
+  );
+});
+
+test('一次性護甲技能狀態不會被誤顯示為拉霸傷害倍率', () => {
+  let state = createGame({
+    id: 'shield-status-render-test',
+    ownerId: 'player-1',
+    loadout: { skillIds: ['shield-throw'], itemIds: [] },
+  });
+  state.resources.mana = 1;
+  state = activateSkill(state, 'shield-throw');
+
+  const player = renderGame(state).embeds[0].fields.find((field) => (
+    field.name.startsWith('👤 玩家')
+  ));
+  assert.match(player.value, /盾牌投擲/);
+  assert.doesNotMatch(player.value, /盾牌投擲[^\n]*×1/);
 });
 
 test('被動技能詳情不顯示法力消耗與使用按鈕', () => {
@@ -233,6 +273,7 @@ test('戰鬥勝利先顯示敵人生命0與確認按鈕，確認後才顯示獎�
   const victoryPayload = renderGame(state);
 
   assert.match(victoryPayload.embeds[0].fields[0].name, /HP　0\//);
+  assert.doesNotMatch(victoryPayload.embeds[0].description, /HP 已回滿/);
   assert.deepEqual(
     victoryPayload.components[0].components.map((component) => component.label),
     ['確認'],
@@ -245,6 +286,26 @@ test('戰鬥勝利先顯示敵人生命0與確認按鈕，確認後才顯示獎�
   assert.equal(payload.embeds[0].fields.length, 3);
   assert.equal(payload.components[0].components.length, 3);
   assert.match(payload.embeds[0].fields[0].name, /【普通】/);
+});
+
+test('擊敗地區BOSS時顯示HP已回滿', () => {
+  let state = createGame({
+    id: 'boss-recovery-render-test',
+    ownerId: 'player-1',
+    config: {
+      initialEnemyUnitId: 'ruins-guardian',
+      initialEnemyOverrides: { maxHp: 1 },
+    },
+    monsterRng: () => 0,
+  });
+  state.player.hp = 7;
+  state = placeBet(state, 1, {
+    reels: [SymbolId.ATTACK, SymbolId.DEFENSE, SymbolId.SKILL],
+  });
+
+  const payload = renderGame(state);
+  assert.match(payload.embeds[0].description, /HP 已回滿/);
+  assert.match(payload.embeds[0].fields.at(-1).name, /45\/45/);
 });
 
 test('戰鬥面板會分開顯示玩家與敵人的狀態', () => {
@@ -262,6 +323,20 @@ test('戰鬥面板會分開顯示玩家與敵人的狀態', () => {
 
   assert.match(enemy.value, /敵人狀態[\s\S]*燃燒 ×3/);
   assert.match(player.value, /玩家狀態\*\*\n無/);
+});
+
+test('怪物被動技能狀態只顯示名稱，不顯示說明或回合數', () => {
+  const state = createGame({
+    id: 'passive-monster-status-render',
+    ownerId: 'player-1',
+    config: { initialEnemyUnitId: 'elite-ruins-sentinel' },
+    monsterRng: () => 0,
+  });
+  const enemy = renderGame(state).embeds[0].fields
+    .find((field) => field.name.startsWith('👹'));
+
+  assert.match(enemy.value, /敵人狀態[\s\S]*🛡️護甲強化/);
+  assert.doesNotMatch(enemy.value, /護甲強化.*回合|受到的傷害/);
 });
 
 test('奇遇只顯示內文與選項，不會公開事件名稱', () => {

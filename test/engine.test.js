@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
+import { DamageSource } from '../src/game/data/damage-sources.js';
 import {
   abandonGame,
   activateSkill,
@@ -23,13 +24,18 @@ import { getEvent } from '../src/game/data/events.js';
 const { ATTACK, DEFENSE, SKILL, UNLUCKY } = SymbolId;
 const zero = () => 0;
 
-function game({ enemy = {}, ...config } = {}) {
+function game({
+  enemy = {},
+  initialEnemyUnitId = 'ruins-sentinel',
+  ...config
+} = {}) {
   return createGame({
     id: 'test-game',
     ownerId: 'player-1',
     config: {
-      initialEnemyUnitId: 'ruins-guardian',
-      initialEnemyOverrides: enemy,
+      // 通用引擎測試固定使用無減傷的普通怪；BOSS規則由專用案例驗證。
+      initialEnemyUnitId,
+      initialEnemyOverrides: { maxHp: 60, baseDamage: 15, ...enemy },
       ...config,
     },
     worldRng: zero,
@@ -76,6 +82,8 @@ test('每次拉霸會立即攻擊並累積本回合護甲與法力', () => {
   assert.deepEqual(state.resources, { action: 2, armor: 2, mana: 0 });
   assert.deepEqual(state.lastImpact, {
     attackDamage: 6,
+    spinDamage: 6,
+    skillDamage: 0,
     armorGained: 2,
     manaGained: 0,
     equipmentBonus: 0,
@@ -127,7 +135,7 @@ test('治癒技能會依等級回復5、10、15點生命', () => {
     let state = createGame({
       id: `healing-level-${level}`,
       ownerId: 'player-1',
-      config: { initialEnemyUnitId: 'ruins-guardian' },
+      config: { initialEnemyUnitId: 'ruins-sentinel' },
       loadout: { skillIds: ['life-recovery'], itemIds: [] },
       monsterRng: zero,
     });
@@ -145,7 +153,7 @@ test('強擊狀態會跨回合保留，並使下一次拉霸攻擊造成2倍傷�
     id: 'power-strike-test',
     ownerId: 'player-1',
     config: {
-      initialEnemyUnitId: 'ruins-guardian',
+      initialEnemyUnitId: 'ruins-sentinel',
       initialEnemyOverrides: { maxHp: 200, baseDamage: 0 },
     },
     loadout: { skillIds: ['power-strike'], itemIds: ['healing-potion'] },
@@ -199,7 +207,10 @@ test('火焰附加使後續有攻擊的拉霸額外造成1點傷害', () => {
   let state = createGame({
     id: 'fire-imbue-test',
     ownerId: 'player-1',
-    config: { initialEnemyUnitId: 'ruins-guardian' },
+    config: {
+      initialEnemyUnitId: 'ruins-sentinel',
+      initialEnemyOverrides: { maxHp: 60 },
+    },
     loadout: { skillIds: ['fire-imbue'], itemIds: ['healing-potion'] },
     monsterRng: zero,
   });
@@ -218,7 +229,7 @@ test('火焰附加會依等級使拉霸攻擊額外造成1、2、3點傷害', ()
       id: `fire-imbue-level-${level}`,
       ownerId: 'player-1',
       config: {
-        initialEnemyUnitId: 'ruins-guardian',
+        initialEnemyUnitId: 'ruins-sentinel',
         initialEnemyOverrides: { maxHp: 100, damageResistances: {} },
       },
       loadout: { skillIds: ['fire-imbue'], itemIds: [] },
@@ -238,7 +249,7 @@ test('消耗品可在戰鬥中使用並從背包扣除', () => {
   let state = createGame({
     id: 'potion-test',
     ownerId: 'player-1',
-    config: { initialEnemyUnitId: 'ruins-guardian' },
+    config: { initialEnemyUnitId: 'ruins-sentinel' },
     loadout: { skillIds: ['life-recovery'], itemIds: ['healing-potion'] },
     monsterRng: zero,
   });
@@ -256,7 +267,7 @@ test('劍在每場戰鬥開始時取得攻擊力狀態並持續3回合', () => {
     ownerId: 'player-1',
     config: {
       playerMaxHp: 100,
-      initialEnemyUnitId: 'ruins-guardian',
+      initialEnemyUnitId: 'ruins-sentinel',
       initialEnemyOverrides: { maxHp: 100, baseDamage: 0 },
     },
     loadout: { skillIds: ['life-recovery'], itemIds: ['sword'] },
@@ -295,7 +306,7 @@ test('火焰炸彈附加3層燃燒並在回合開始造成層數傷害後減少1
     id: 'bomb-test',
     ownerId: 'player-1',
     config: {
-      initialEnemyUnitId: 'ruins-guardian',
+      initialEnemyUnitId: 'ruins-sentinel',
       initialEnemyOverrides: {
         maxHp: 100,
         baseDamage: 0,
@@ -308,10 +319,15 @@ test('火焰炸彈附加3層燃燒並在回合開始造成層數傷害後減少1
   state = useItem(state, 'fire-bomb', { rng: zero });
   assert.equal(state.enemy.hp, 92);
   assert.equal(state.enemy.activeStatuses[0].stacks, 3);
+  assert.equal(state.history.at(-1).events[0].damageSource, DamageSource.ITEM);
 
   state = endPlayerTurn(state, { monsterRng: zero });
   assert.equal(state.enemy.hp, 89);
   assert.equal(state.enemy.activeStatuses[0].stacks, 2);
+  assert.equal(
+    state.lastResolution.enemyStatusEvents[0].damageSource,
+    DamageSource.STATUS,
+  );
   state = endPlayerTurn(state, { monsterRng: zero });
   assert.equal(state.enemy.hp, 87);
   assert.equal(state.enemy.activeStatuses[0].stacks, 1);
@@ -325,7 +341,7 @@ test('火焰衝擊立即造成5點傷害並以60%機率附加3層燃燒', () => 
     id: 'flame-impact-test',
     ownerId: 'player-1',
     config: {
-      initialEnemyUnitId: 'ruins-guardian',
+      initialEnemyUnitId: 'ruins-sentinel',
       initialEnemyOverrides: {
         maxHp: 100,
         baseDamage: 0,
@@ -341,6 +357,8 @@ test('火焰衝擊立即造成5點傷害並以60%機率附加3層燃燒', () => 
   assert.equal(state.enemy.hp, 95);
   assert.equal(state.enemy.activeStatuses[0].stacks, 3);
   assert.equal(state.resources.mana, 6);
+  assert.equal(state.history.at(-1).events[0].damageSource, DamageSource.SKILL);
+  assert.equal(state.combatModifiers.damageDealtBySource.skill, 5);
 });
 
 test('火焰衝擊會依等級附加3、4、5層燃燒', () => {
@@ -349,7 +367,7 @@ test('火焰衝擊會依等級附加3、4、5層燃燒', () => {
       id: `flame-impact-level-${level}`,
       ownerId: 'player-1',
       config: {
-        initialEnemyUnitId: 'ruins-guardian',
+        initialEnemyUnitId: 'ruins-sentinel',
         initialEnemyOverrides: {
           maxHp: 100,
           baseDamage: 0,
@@ -404,8 +422,37 @@ test('擊敗怪物後先等待玩家確認，再進入獨立獎勵選擇', () =>
   assert.equal(state.adventure.defeatedUnitCount, 1);
 });
 
+test('擊敗地區BOSS時生命回滿，普通敵人不觸發', () => {
+  let bossState = game({
+    initialEnemyUnitId: 'ruins-guardian',
+    enemy: { maxHp: 1 },
+  });
+  bossState.player.hp = 7;
+  bossState = placeBet(bossState, 1, {
+    reels: [ATTACK, DEFENSE, SKILL],
+  });
+
+  assert.equal(bossState.phase, GamePhase.VICTORY_CONFIRM);
+  assert.equal(bossState.player.hp, bossState.player.maxHp);
+
+  let normalState = game({
+    initialEnemyUnitId: 'ruins-sentinel',
+    enemy: { maxHp: 1 },
+  });
+  normalState.player.hp = 7;
+  normalState = placeBet(normalState, 1, {
+    reels: [ATTACK, DEFENSE, SKILL],
+  });
+
+  assert.equal(normalState.phase, GamePhase.VICTORY_CONFIRM);
+  assert.equal(normalState.player.hp, 7);
+});
+
 test('選擇Boss獎勵後換區，敵人生命與基礎傷害提高20%', () => {
-  let state = placeBet(game({ enemy: { maxHp: 3 } }), 1, {
+  let state = placeBet(game({
+    initialEnemyUnitId: 'ruins-guardian',
+    enemy: { maxHp: 2 },
+  }), 1, {
     reels: [ATTACK, ATTACK, DEFENSE],
     rewardRng: zero,
   });
@@ -494,7 +541,10 @@ test('神秘泉水有20%機率進入菁英戰鬥，整個奇遇只計一次進�
 });
 
 test('戰敗會立即結束遊戲並清除本輪資料，只保留結算快照', () => {
-  const state = endPlayerTurn(game({ enemy: { baseDamage: 999 } }), {
+  const state = endPlayerTurn(game({
+    initialEnemyUnitId: 'ruins-guardian',
+    enemy: { baseDamage: 999 },
+  }), {
     monsterRng: zero,
   });
 
@@ -522,7 +572,7 @@ test('投入點數必須是剩餘行動點範圍內的整數', () => {
 });
 
 test('舊版Boss戰存檔會升級為冒險格式', () => {
-  const current = game();
+  const current = game({ initialEnemyUnitId: 'ruins-guardian' });
   const legacy = {
     ...structuredClone(current),
     schemaVersion: 2,

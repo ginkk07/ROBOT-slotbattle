@@ -1,6 +1,12 @@
 import { EVENTS } from '../data/events.js';
+import { DamageSource } from '../data/damage-sources.js';
 import { EVENT_RULES } from '../data/event-rules.js';
+import {
+  getMonsterSkill,
+  MonsterSkillActivation,
+} from '../data/monster-skills.js';
 import { getRegion } from '../data/regions.js';
+import { applyEffects } from './effects.js';
 import { drawEncounter } from './encounter-engine.js';
 import { drawEvent } from './event-engine.js';
 import { pickWeighted } from './weighted-random.js';
@@ -107,7 +113,7 @@ export function regionScalingMultipliers(
 
 export function scaleEnemyUnit(unit, depth, region = getRegion('ruins')) {
   const multipliers = regionScalingMultipliers(depth, region);
-  return {
+  let enemy = {
     unitId: unit.id,
     name: unit.name,
     rank: unit.rank,
@@ -124,6 +130,22 @@ export function scaleEnemyUnit(unit, depth, region = getRegion('ruins')) {
     activeStatuses: [],
     lootTableId: unit.lootTableId,
   };
+
+  // 單位只保存一份 skillIds；技能本身的 activation 決定開場套用或回合抽選。
+  for (const skillId of enemy.skillIds) {
+    const skill = getMonsterSkill(skillId);
+    if (skill.activation !== MonsterSkillActivation.PASSIVE) continue;
+    const result = applyEffects({
+      effects: skill.effects ?? [],
+      source: enemy,
+      target: enemy,
+      damageSource: DamageSource.SKILL,
+      rng: () => 0,
+    });
+    enemy = result.source;
+  }
+
+  return enemy;
 }
 
 function combatNode(unit, depth, bossChance, region) {

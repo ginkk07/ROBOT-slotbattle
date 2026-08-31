@@ -4,11 +4,22 @@ import assert from 'node:assert/strict';
 import { getItem } from '../src/game/data/items.js';
 import { EVENT_RULES } from '../src/game/data/event-rules.js';
 import { getMonsterActionRule } from '../src/game/data/monster-actions.js';
-import { getMonsterSkill } from '../src/game/data/monster-skills.js';
+import {
+  getMonsterSkill,
+  MonsterSkillActivation,
+} from '../src/game/data/monster-skills.js';
 import { PLAYER_PROGRESSION_RULES } from '../src/game/data/player-progression.js';
 import { getRegion } from '../src/game/data/regions.js';
-import { SkillActivation } from '../src/game/data/skill-effects.js';
-import { getSkill, getSkillLevelDefinition } from '../src/game/data/skills.js';
+import {
+  PassiveSkillTrigger,
+  SkillActivation,
+} from '../src/game/data/skill-effects.js';
+import {
+  SKILLS,
+  getSkill,
+  getSkillLevelDefinition,
+  skillCost,
+} from '../src/game/data/skills.js';
 import { getStatus } from '../src/game/data/statuses.js';
 import { getUnit } from '../src/game/data/units.js';
 import { validateGameData } from '../src/game/data/validate.js';
@@ -24,16 +35,24 @@ test('單位以rank與tags區分普通、菁英與Boss', () => {
 
   assert.equal(normal.skillIds.length, 1);
   assert.equal(elite.rank, 'elite');
-  assert.equal(elite.skillIds.length, 2);
+  assert.equal(elite.skillIds.filter((skillId) => (
+    getMonsterSkill(skillId).activation === MonsterSkillActivation.ACTIVE
+  )).length, 2);
+  assert.ok(elite.skillIds.includes('armor-reinforcement'));
+  assert.deepEqual(elite.damageResistances, {});
   assert.ok(elite.tags.includes('elite'));
   assert.equal(boss.rank, 'boss');
   assert.ok(boss.tags.includes('construct'));
-  assert.equal(boss.skillIds.length, 3);
+  assert.equal(boss.skillIds.filter((skillId) => (
+    getMonsterSkill(skillId).activation === MonsterSkillActivation.ACTIVE
+  )).length, 3);
+  assert.ok(boss.skillIds.includes('armor-reinforcement'));
+  assert.deepEqual(boss.damageResistances, {});
   assert.equal(boss.lootTableId, 'ruins-boss-loot');
 });
 
 test('玩家技能與道具共用effects，怪物技能使用獨立資料庫', () => {
-  assert.deepEqual(getSkill('life-recovery').effects[0], {
+  assert.deepEqual(getSkillLevelDefinition('life-recovery', 1).effects[0], {
     type: 'heal',
     amount: 5,
     target: 'self',
@@ -86,8 +105,50 @@ test('玩家技能與道具共用effects，怪物技能使用獨立資料庫', (
     )),
     [1, 2, 3],
   );
+  assert.equal(
+    getSkillLevelDefinition('mana-armor', 1).passiveEffects[0].trigger,
+    PassiveSkillTrigger.BEFORE_DAMAGE_TAKEN,
+  );
+  assert.deepEqual(
+    getSkill('shield-block').levels.map((level) => level.effects[0].amount),
+    [2, 4, 6],
+  );
+  assert.deepEqual(
+    getSkill('flame-cover').levels.map((level) => level.effects[1].potency),
+    [1, 2, 3],
+  );
+  assert.deepEqual(
+    getSkill('shield-throw').levels.map((level) => level.effects[0].potency),
+    [1, 2, 3],
+  );
+  assert.deepEqual(
+    getSkill('shield-bash').levels.map((level) => level.effects[0].multiplier),
+    [1, 2, 3],
+  );
+  assert.deepEqual(
+    [1, 2, 3].map((level) => skillCost('holy-shield', level)),
+    [5, 4, 3],
+  );
+  for (const skill of Object.values(SKILLS)) {
+    assert.equal(Object.hasOwn(skill, 'description'), false);
+    assert.equal(Object.hasOwn(skill, 'effects'), false);
+    assert.equal(Object.hasOwn(skill, 'passiveEffects'), false);
+  }
+  assert.equal(getItem('rune-cube').equipmentEffects[0].amount, 4);
+  assert.equal(getItem('thorns').rarity, 'common');
+  assert.equal(getItem('magic-stone').rarity, 'common');
+  assert.equal(getItem('diamond').rarity, 'legendary');
   assert.equal(getItem('cursed-snake-scale').type, 'equipment');
   assert.equal(getMonsterSkill('guardian-strike').power, 1.25);
+  assert.equal(
+    getMonsterSkill('armor-reinforcement').activation,
+    MonsterSkillActivation.PASSIVE,
+  );
+  assert.equal(getStatus('armor-reinforcement').durationMode, 'battle');
+  assert.equal(
+    getStatus('armor-reinforcement').effect.amountPerPotency,
+    0.2,
+  );
   assert.equal(getStatus('attack-up').stacking.mode, 'stack-potency');
   assert.equal(getStatus('burning').trigger, 'turn-start');
   assert.equal(getStatus('burning').stacking.mode, 'stack-countdown');
@@ -109,6 +170,7 @@ test('可調整的全域平衡規則集中在資料層', () => {
   assert.equal(getMonsterActionRule('normal').basicAttackChance, 0.6);
   assert.equal(getMonsterActionRule('boss').requiredSkillCount, 3);
   assert.equal(region.encounterRules.boss.minimumCompletedEncounters, 4);
+  assert.equal(region.encounterRules.boss.restorePlayerHpAfterVictory, true);
   assert.equal(region.encounterRules.event.chance, 0.2);
   assert.equal(region.encounterRules.elite.baseChance, 0.12);
   assert.equal(region.scaling.maxHpPerDepth, 0.2);

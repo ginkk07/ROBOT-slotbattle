@@ -1,9 +1,11 @@
 import { getItem } from '../data/items.js';
+import { EffectType } from '../data/effect-types.js';
 import { SkillActivation } from '../data/skill-effects.js';
 import {
   getSkill,
   getSkillLevelDefinition,
   skillActivation,
+  skillCost,
 } from '../data/skills.js';
 import { getStatus } from '../data/statuses.js';
 import { playerSkillLevel } from './skill-progression.js';
@@ -24,19 +26,21 @@ export function skillActionAvailability(state, skillId) {
   }
   const phaseReason = playerActionBlockReason(state);
   if (phaseReason) return blocked(phaseReason);
-  if (state.resources.mana < skill.cost) {
-    return blocked(`需要 ${skill.cost} 點法力，目前只有 ${state.resources.mana} 點`);
-  }
-
   const definition = getSkillLevelDefinition(skillId, level);
+  const cost = skillCost(skill, level);
+  if (state.resources.mana < cost) {
+    return blocked(`需要 ${cost} 點法力，目前只有 ${state.resources.mana} 點`);
+  }
   if (onlyHealsSelf(definition.effects) && state.player.hp >= state.player.maxHp) {
     return blocked('生命已全滿');
   }
   if (onlyRefreshesExistingStatuses(definition.effects, state.player)) {
     return blocked('相同狀態目前仍在持續中');
   }
+  const resourceReason = effectResourceBlockReason(definition.effects, state.resources);
+  if (resourceReason) return blocked(resourceReason);
 
-  return { usable: true, reason: null, level, definition };
+  return { usable: true, reason: null, level, definition, cost };
 }
 
 export function itemActionAvailability(state, itemId) {
@@ -91,10 +95,23 @@ function onlyRefreshesExistingStatuses(effects = [], player) {
       ?.find((status) => status.statusId === effect.statusId);
     if (!active) return false;
     const status = getStatus(effect.statusId);
+    if (status.durationMode === 'battle') return true;
     if (status.durationMode === 'until-consumed') return true;
     if (status.stacking.mode === 'refresh-duration') return true;
     return Number(active.stacks ?? 1) >= status.stacking.maxStacks;
   });
+}
+
+function effectResourceBlockReason(effects = [], resources = {}) {
+  for (const effect of effects) {
+    if (effect.type !== EffectType.DAMAGE_FROM_RESOURCE) continue;
+    const minimum = Number(effect.minimumResource ?? 0);
+    if (Number(resources[effect.resource] ?? 0) >= minimum) continue;
+    const label = { action: '❇️', armor: '🛡️', mana: '✨' }[effect.resource]
+      ?? effect.resource;
+    return `至少需要 ${minimum} 點${label}`;
+  }
+  return null;
 }
 
 function blocked(reason) {

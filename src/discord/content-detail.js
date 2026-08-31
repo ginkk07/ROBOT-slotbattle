@@ -6,6 +6,7 @@ import {
   getSkill,
   getSkillLevelDefinition,
   skillActivation,
+  skillCost,
 } from '../game/data/skills.js';
 import {
   itemActionAvailability,
@@ -45,7 +46,7 @@ function renderSkillDetail(state, skillId) {
       { name: '稀有度', value: rarityLabel(skill.rarity), inline: true },
       passive
         ? { name: '技能類型', value: '被動技能', inline: true }
-        : { name: '法力消耗', value: String(skill.cost), inline: true },
+        : { name: '法力消耗', value: String(skillCost(skill, level)), inline: true },
       { name: '效果', value: definition.description, inline: false },
       availabilityField(availability),
     ],

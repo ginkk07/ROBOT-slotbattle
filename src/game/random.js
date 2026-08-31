@@ -63,10 +63,19 @@ export function resolveSymbolChances(fixedChances = {}) {
   }
 
   const fixedTotal = fixedEntries.reduce((sum, [, chance]) => sum + chance, 0);
-  if (fixedTotal > 1) throw new RangeError('指定牌面機率總和不可超過1');
+  if (fixedTotal > 1 + 1e-12) throw new RangeError('指定牌面機率總和不可超過1');
 
   const fixedIds = new Set(fixedEntries.map(([symbolId]) => symbolId));
   const remainingSymbols = ALL_SYMBOLS.filter((symbolId) => !fixedIds.has(symbolId));
+  if (remainingSymbols.length === 0) {
+    if (Math.abs(fixedTotal - 1) > 1e-12) {
+      throw new RangeError('完整牌面機率總和必須為1');
+    }
+    return Object.fromEntries(ALL_SYMBOLS.map((symbolId) => [
+      symbolId,
+      fixedChances[symbolId] / fixedTotal,
+    ]));
+  }
   const remainingBaseTotal = remainingSymbols.reduce(
     (sum, symbolId) => sum + SYMBOL_META[symbolId].probability,
     0,

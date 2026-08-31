@@ -5,8 +5,10 @@ export {
   contentTypeEmoji,
   contentTypeMeta,
 } from './content-types.js';
+export { DAMAGE_SOURCES, DamageSource } from './damage-sources.js';
 export { EVENT_RULES } from './event-rules.js';
 export { EVENTS, getEvent } from './events.js';
+export { EFFECT_TYPES, EffectType } from './effect-types.js';
 export { ITEMS, getItem } from './items.js';
 export {
   ITEM_EFFECT_TRIGGERS,
@@ -15,7 +17,11 @@ export {
   ItemEffectType,
 } from './item-effects.js';
 export { LOOT_TABLES, getLootTable } from './loot-tables.js';
-export { MONSTER_SKILLS, getMonsterSkill } from './monster-skills.js';
+export {
+  MONSTER_SKILLS,
+  MonsterSkillActivation,
+  getMonsterSkill,
+} from './monster-skills.js';
 export {
   MONSTER_ACTION_RULES,
   getMonsterActionRule,
@@ -34,18 +40,26 @@ export {
   getSkillLevelDefinition,
   getSkillMaxLevel,
   skillActivation,
+  skillCost,
+  skillDescription,
   skillUsageLabel,
 } from './skills.js';
 export {
   PASSIVE_SKILL_EFFECT_TYPES,
+  PASSIVE_SKILL_TRIGGERS,
   SKILL_ACTIVATIONS,
   PassiveSkillEffectType,
+  PassiveSkillTrigger,
   SkillActivation,
 } from './skill-effects.js';
 export {
   BossRuleMode,
+  STATUS_EFFECT_TYPES,
+  STATUS_TRIGGERS,
   STATUSES,
+  StatusEffectType,
   StatusPolarity,
+  StatusTrigger,
   getStatus,
 } from './statuses.js';
 export { UNITS, UnitRank, getUnit } from './units.js';

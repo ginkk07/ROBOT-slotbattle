@@ -1,4 +1,5 @@
 import { getItem } from '../data/items.js';
+import { DamageSource } from '../data/damage-sources.js';
 import { ItemEffectTrigger, ItemEffectType } from '../data/item-effects.js';
 import { applyEffects } from './effects.js';
 
@@ -71,11 +72,18 @@ export function resourceGainAmount(player, resource, amount) {
 }
 
 export function preservesTurnResource(player, resource) {
+  return turnResourceRetentionRatio(player, resource) > 0;
+}
+
+export function turnResourceRetentionRatio(player, resource) {
   return equipmentEffectEntries(
     player,
     ItemEffectTrigger.TURN_RESOURCES_CLEAR,
     ItemEffectType.PRESERVE_RESOURCE,
-  ).some(({ effect }) => effect.resource === resource);
+  ).reduce((maximum, { effect }) => {
+    if (effect.resource !== resource) return maximum;
+    return Math.max(maximum, Number(effect.ratio ?? 1));
+  }, 0);
 }
 
 export function promotesSymbolsWithLucky(player) {
@@ -115,6 +123,34 @@ export function reduceIncomingDamageWithEquipment(player, damage) {
     }
   }
   return reduced;
+}
+
+/**
+ * 敵人攻擊結束後，將實際消耗的資源交給對應裝備產生傷害請求。
+ * 荊棘只是一筆「消耗護甲轉傷害」資料，戰鬥流程不辨識道具 ID。
+ */
+export function afterEnemyAttackEquipmentDamageRequests(
+  player,
+  spentResources = {},
+) {
+  const requests = [];
+  for (const { itemId, effect } of equipmentEffectEntries(
+    player,
+    ItemEffectTrigger.AFTER_ENEMY_ATTACK,
+    ItemEffectType.DAMAGE_FROM_SPENT_RESOURCE,
+  )) {
+    const spent = Number(spentResources[effect.resource] ?? 0);
+    const amount = Math.floor(spent * Number(effect.multiplier ?? 1));
+    if (amount <= 0) continue;
+    requests.push({
+      itemId,
+      resource: effect.resource,
+      spent,
+      amount,
+      element: effect.element,
+    });
+  }
+  return requests;
 }
 
 export function healingResourceBonus(player, healEvents) {
@@ -201,6 +237,7 @@ export function applyTriggeredEquipmentEffects(state, trigger) {
         effects: effect.effects,
         source: state.player,
         target: state.enemy,
+        damageSource: DamageSource.EQUIPMENT,
       });
       state.player = result.source;
       state.enemy = result.target;

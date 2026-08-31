@@ -176,7 +176,7 @@ test('裝備選單可以開啟所選裝備的詳情', async () => {
     userId: 'player-1',
     values: ['sword'],
   });
-  assert.match(detail.payload.embeds[0].title, /🎒 劍/);
+  assert.match(detail.payload.embeds[0].title, /📦 劍/);
   assert.deepEqual(
     detail.payload.components[0].components.map((component) => component.label),
     ['關閉'],
