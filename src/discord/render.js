@@ -239,6 +239,8 @@ function renderRewardChoice(state) {
 
 function renderEvent(state) {
   const resultStage = state.event.stage === 'result';
+  const eventText = resultStage ? state.event.result.text : state.event.description;
+  const progress = `地區 ${state.adventure.regionDepth}｜本區完成 ${state.adventure.regionProgress} 次遭遇`;
   const components = resultStage
     ? [actionRow([
       button({
@@ -259,13 +261,12 @@ function renderEvent(state) {
   return {
     embeds: [{
       color: COLORS.event,
-      title: resultStage ? '奇遇結果' : `【${rarityLabel(state.event.rarity)}】奇遇`,
-      description: resultStage ? state.event.result.text : state.event.description,
-      fields: [{
-        name: '冒險進度',
-        value: `地區 ${state.adventure.regionDepth}｜本區完成 ${state.adventure.regionProgress} 次遭遇`,
-      }],
-      footer: { text: resultStage ? '繼續後會增加一次地區進度' : '奇遇名稱不會顯示' },
+      title: '冒險進度',
+      description: [
+        progress,
+        '',
+        `【奇遇】${eventText}`,
+      ].join('\n'),
     }],
     components,
   };

@@ -353,7 +353,7 @@ test('怪物被動技能狀態只顯示名稱，不顯示說明或回合數', ()
   assert.doesNotMatch(enemy.value, /護甲強化.*回合|受到的傷害/);
 });
 
-test('奇遇只顯示內文與選項，不會公開事件名稱', () => {
+test('奇遇先顯示冒險進度，再顯示不公開名稱的奇遇內文', () => {
   const event = getEvent('ruins-mysterious-spring');
   const state = createGame({
     id: 'event-render',
@@ -373,11 +373,29 @@ test('奇遇只顯示內文與選項，不會公開事件名稱', () => {
     result: null,
   };
   const payload = renderGame(state);
+  const embed = payload.embeds[0];
   const labels = payload.components[0].components.map((component) => component.label);
 
-  assert.doesNotMatch(payload.embeds[0].title, /神秘泉水/);
-  assert.match(payload.embeds[0].description, /是否要取水喝/);
+  assert.equal(embed.title, '冒險進度');
+  assert.equal(
+    embed.description,
+    '地區 1｜本區完成 0 次遭遇\n\n【奇遇】你遇到一座充滿生命力的泉水，是否要取水喝？',
+  );
+  assert.equal(embed.fields, undefined);
+  assert.equal(embed.footer, undefined);
+  assert.doesNotMatch(JSON.stringify(payload), /神秘泉水/);
+  assert.doesNotMatch(JSON.stringify(payload), /奇遇名稱不會顯示/);
   assert.deepEqual(labels, ['是', '否']);
+
+  state.event.stage = 'result';
+  state.event.result = { text: '你覺得身體裡充滿活力，HP 回滿了。' };
+  const resultEmbed = renderGame(state).embeds[0];
+
+  assert.equal(resultEmbed.title, '冒險進度');
+  assert.equal(
+    resultEmbed.description,
+    '地區 1｜本區完成 0 次遭遇\n\n【奇遇】你覺得身體裡充滿活力，HP 回滿了。',
+  );
 });
 
 test('遊戲結束畫面顯示擊敗數量與最後技能道具配置', () => {
