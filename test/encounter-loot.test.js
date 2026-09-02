@@ -91,6 +91,21 @@ test('奇遇稀有度在60%與90%邊界依序切換普通、稀有、傳說', ()
   assert.equal(legendary.rarity, 'legendary');
 });
 
+test('廢棄營地與神秘收藏家已加入奇遇抽選池', () => {
+  const progress = createAdventureProgress();
+  progress.completedEncounters = 1;
+
+  const camp = drawNextAdventureNode(progress, {
+    rng: sequence([0, 0.599, 0.999]),
+  });
+  const collector = drawNextAdventureNode(progress, {
+    rng: sequence([0, 0.9, 0.999]),
+  });
+
+  assert.equal(camp.event.id, 'ruins-abandoned-camp');
+  assert.equal(collector.event.id, 'ruins-mysterious-collector');
+});
+
 test('戰鬥獎勵稀有度修正不會改變奇遇稀有度或怪物階級', () => {
   const progress = createAdventureProgress();
   progress.completedEncounters = 1;

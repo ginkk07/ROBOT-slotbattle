@@ -120,8 +120,7 @@ export const EVENTS = createCatalog([
     id: 'ruins-abandoned-camp',
     name: '廢棄營地',
     rarity: EventRarity.COMMON,
-    weight: 1,
-    available: false,
+    weight: 100,
     tags: ['ruins'],
     description: '你在斷牆後發現一座廢棄營地。火堆早已熄滅，但破損的帳篷仍勉強能夠遮蔽風雨。連日的戰鬥讓你感到疲憊，也許可以在這裡休息片刻。',
     options: [{
@@ -191,7 +190,6 @@ export const EVENTS = createCatalog([
     name: '神秘收藏家',
     rarity: EventRarity.LEGENDARY,
     weight: 100,
-    available: false,
     tags: ['ruins'],
     description: '你在遺跡深處遇見一名戴著銀色面具的收藏家。他的身旁擺著一只刻滿符文的魔導轉輪匣，匣中陳列著一件傳說裝備，另一側則封存著一段失傳的技藝。「選一樣你想要的，再拿你的一項技能作為賭注。四次轉動之內，讓三枚符文排列一致，它就是你的。」',
     options: [
