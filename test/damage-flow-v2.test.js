@@ -93,6 +93,13 @@ test('詛咒依觸發傷害與各自層數結算，且詛咒與反射不互相�
     stacks: 3,
     potency: 1,
   });
+  state.enemy.activeStatuses.push({
+    statusId: 'armor-reinforcement',
+    sourceUnitId: null,
+    remainingTurns: null,
+    stacks: 1,
+    potency: 1,
+  });
   state = endPlayerTurn(state, { monsterRng: zero });
 
   // 玩家：主要傷害2＋詛咒2；敵人：詛咒2＋一次反射5。
@@ -110,6 +117,11 @@ test('詛咒依觸發傷害與各自層數結算，且詛咒與反射不互相�
       [DamageSource.REFLECT, 'enemy', 5],
     ],
   );
+  const reflectedToReinforcedEnemy = state.lastResolution.damageFollowUpEvents
+    .find((event) => event.damageSource === DamageSource.REFLECT);
+  assert.equal(reflectedToReinforcedEnemy.requested, 5);
+  assert.equal(reflectedToReinforcedEnemy.damageReduction, 0);
+  assert.equal(reflectedToReinforcedEnemy.amount, 5);
 
   let beads = battle({ itemIds: ['prayer-beads'], enemyDamage: 4 });
   beads.player.activeStatuses.push({
@@ -121,6 +133,12 @@ test('詛咒依觸發傷害與各自層數結算，且詛咒與反射不互相�
   beads = endPlayerTurn(beads, { monsterRng: zero });
   assert.equal(beads.player.hp, 40); // 主要傷害4＋佛珠減免後詛咒1。
   assert.equal(beads.enemy.hp, 496);
+  assert.equal(
+    beads.lastResolution.damageFollowUpEvents.find((event) => (
+      event.damageSource === DamageSource.CURSE && event.target === 'self'
+    )).sourceDamageReduction,
+    3,
+  );
 
   let voodoo = battle({ itemIds: ['voodoo-doll'] });
   voodoo = placeBet(voodoo, 1, {
@@ -131,6 +149,34 @@ test('詛咒依觸發傷害與各自層數結算，且詛咒與反射不互相�
   assert.equal(voodoo.player.hp, 45);
   assert.equal(voodoo.player.activeStatuses[0].stacks, 1);
   assert.equal(voodoo.enemy.activeStatuses[0].stacks, 1);
+});
+
+test('反射傷害先結算專用減傷再消耗護甲，且不走一般抗性', () => {
+  let state = battle();
+  state.resources.armor = 3;
+  state.enemy.activeStatuses.push({
+    statusId: 'damage-reflection',
+    sourceUnitId: null,
+    remainingTurns: null,
+    stacks: 5,
+    potency: 1,
+  });
+
+  state = placeBet(state, 1, {
+    reels: [ATTACK, SKILL, SKILL],
+    chanceRng: zero,
+  });
+
+  const reflection = state.history.at(-1).statusEvents
+    .find((event) => event.damageSource === DamageSource.REFLECT);
+  assert.equal(reflection.requested, 5);
+  assert.equal(reflection.sourceDamageReduction, 0);
+  assert.equal(reflection.armorUsed, 3);
+  assert.equal(reflection.resistance, 0);
+  assert.equal(reflection.damageReduction, 0);
+  assert.equal(reflection.amount, 2);
+  assert.equal(state.resources.armor, 0);
+  assert.equal(state.player.hp, 43);
 });
 
 test('暈眩保留資源，電擊裝置每場只解除一次，惡魔之血仍保留暈眩', () => {

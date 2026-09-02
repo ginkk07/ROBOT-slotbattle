@@ -163,7 +163,7 @@ export const STATUSES = createCatalog([
     id: 'damage-reflection',
     name: '傷害反射',
     emoji: '🌵',
-    description: '實際受到傷害時，對傷害來源造成等同於目前層數的反射傷害。詛咒與反射傷害不會觸發。',
+    description: '實際受到HP傷害時，對傷害來源造成等同於目前層數的反射傷害。反射可被🛡️與指定的反射減傷抵擋，但不受抗性或一般減傷影響；詛咒與反射傷害不會觸發。',
     polarity: StatusPolarity.BUFF,
     category: 'damage-reaction',
     trigger: StatusTrigger.PASSIVE,

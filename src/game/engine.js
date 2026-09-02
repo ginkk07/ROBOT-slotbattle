@@ -1843,15 +1843,40 @@ function dealDamageToEnemy(
 }
 
 /**
- * 直接扣除指定單位 HP。詛咒無視一般抗性與減傷；其餘類別仍走元素減免。
- * 玩家護甲／魔力護甲只在敵人主要攻擊入口處理，不會在此重複消耗。
+ * 直接傷害共用入口：
+ * - 詛咒只套用對應的來源減傷，無視護甲、抗性與一般減傷。
+ * - 反射先套用對應的來源減傷，再由護甲吸收；無視抗性與一般減傷。
+ * - 其餘傷害走既有元素抗性與狀態減傷。
  */
 function applyDirectDamage(state, targetKey, requested, element, damageSource) {
   const unit = state[targetKey];
   if (!unit || unit.hp <= 0 || requested <= 0) return null;
-  const resolved = damageSource === DamageSource.CURSE
-    ? { amount: requested, resistance: 0, damageReduction: 0 }
-    : damageAfterMitigation(requested, unit, element);
+  const usesSourceSpecificReduction = [
+    DamageSource.CURSE,
+    DamageSource.REFLECT,
+  ].includes(damageSource);
+  const sourceReducedAmount = targetKey === 'player' && usesSourceSpecificReduction
+    ? reduceDamageBySource(state.player, damageSource, requested)
+    : requested;
+  const sourceDamageReduction = Math.max(0, requested - sourceReducedAmount);
+  let armorUsed = 0;
+  let resolved;
+
+  if (damageSource === DamageSource.CURSE) {
+    resolved = { amount: sourceReducedAmount, resistance: 0, damageReduction: 0 };
+  } else if (damageSource === DamageSource.REFLECT) {
+    if (targetKey === 'player') {
+      armorUsed = Math.min(state.resources.armor, sourceReducedAmount);
+      state.resources.armor = Math.max(0, state.resources.armor - armorUsed);
+    }
+    resolved = {
+      amount: Math.max(0, sourceReducedAmount - armorUsed),
+      resistance: 0,
+      damageReduction: 0,
+    };
+  } else {
+    resolved = damageAfterMitigation(requested, unit, element);
+  }
   const amount = Math.min(unit.hp, resolved.amount);
   unit.hp -= amount;
   const event = {
@@ -1863,6 +1888,8 @@ function applyDirectDamage(state, targetKey, requested, element, damageSource) {
     damageSource,
     amount,
     target: targetKey === 'enemy' ? 'enemy' : 'self',
+    sourceDamageReduction,
+    armorUsed,
   };
   recordDamageEvents(state, [event]);
   return event;
@@ -1890,14 +1917,7 @@ function resolveDamageFollowUps(
     for (const targetKey of ['player', 'enemy']) {
       const targetStacks = activeStatusValue(state[targetKey], 'curse');
       if (targetStacks <= 0) continue;
-      let requested = Math.min(hit.requested, targetStacks);
-      if (targetKey === 'player') {
-        requested = reduceDamageBySource(
-          state.player,
-          DamageSource.CURSE,
-          requested,
-        );
-      }
+      const requested = Math.min(hit.requested, targetStacks);
       const event = applyDirectDamage(
         state,
         targetKey,
