@@ -5,6 +5,7 @@ import {
   chooseEventSkill,
   chooseEventOption,
   chooseReward,
+  chooseVaultReward,
   completeEvent,
   confirmCombatVictory,
   continueWithoutReward,
@@ -75,7 +76,10 @@ function simulate(strategy, iterations, turnLimit) {
       }
       if (state.phase === GamePhase.EVENT) {
         if (state.event.stage === 'choice') {
-          state = chooseEventOption(state, state.event.options[0].id, {
+          const option = state.event.options.find((entry) => (
+            Number(entry.goldCost ?? 0) <= state.player.gold
+          )) ?? state.event.options.find((entry) => entry.id === 'leave');
+          state = chooseEventOption(state, option.id, {
             eventRng: probabilityRng,
             monsterRng: probabilityRng,
           });
@@ -91,6 +95,8 @@ function simulate(strategy, iterations, turnLimit) {
           state = spinCollectorEvent(state, 'none', {
             eventRng: probabilityRng,
           });
+        } else if (state.event.stage === 'vault-reward-choice') {
+          state = chooseVaultReward(state, 'accept');
         } else if (state.event.stage === 'shop') {
           state = leaveShop(state);
         } else {

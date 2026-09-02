@@ -18,7 +18,10 @@ export const ENCOUNTER_TABLES = createCatalog([
     pools: [
       {
         weight: 100,
-        filter: { requiredTags: ['enemy', 'elite', 'ruins'] },
+        filter: {
+          requiredTags: ['enemy', 'elite', 'ruins'],
+          excludedTags: ['event-only'],
+        },
       },
     ],
   },

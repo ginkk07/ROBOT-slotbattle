@@ -47,8 +47,8 @@ export function validateGameData() {
     }
 
     if (unit.rank !== 'player') {
-      const expectedSkillCount = MONSTER_ACTION_RULES[unit.rank]
-        ?.requiredSkillCount;
+      const expectedSkillCount = unit.requiredActiveSkillCount
+        ?? MONSTER_ACTION_RULES[unit.rank]?.requiredSkillCount;
       if (expectedSkillCount === undefined) {
         errors.push(`單位 ${unit.id} 的怪物階級沒有行動規則：${unit.rank}`);
       } else if (unit.skillIds.filter((skillId) => (
@@ -261,6 +261,12 @@ export function validateGameData() {
       if (!option.id || !option.label) {
         errors.push(`事件 ${event.id} 的選項需要 id 與 label`);
       }
+      if (
+        option.goldCost !== undefined
+        && (!Number.isInteger(option.goldCost) || option.goldCost < 0)
+      ) {
+        errors.push(`事件 ${event.id} 的選項 ${option.id} 金錢需求不合法`);
+      }
       if (!Array.isArray(option.outcomes) || option.outcomes.length === 0) {
         errors.push(`事件 ${event.id} 的選項 ${option.id} 至少需要一個結果`);
         continue;
@@ -276,6 +282,9 @@ export function validateGameData() {
           'reduce-max-hp-upgrade-skill',
           'collector-challenge',
           'open-shop',
+          'gain-gold',
+          'grant-next-battle-status',
+          'grant-random-reward',
         ].includes(outcome.type)) {
           errors.push(`事件 ${event.id} 的結果類型不合法：${outcome.type}`);
         }
@@ -287,6 +296,29 @@ export function validateGameData() {
           && !['normal', 'elite', 'boss'].includes(outcome.rank)
         ) {
           errors.push(`事件 ${event.id} 的戰鬥階級不合法：${outcome.rank}`);
+        }
+        if (outcome.unitId !== undefined) {
+          checkReference(UNITS, outcome.unitId, `事件 ${event.id} 的戰鬥單位`, errors);
+          if (UNITS[outcome.unitId]?.rank !== outcome.rank) {
+            errors.push(`事件 ${event.id} 的戰鬥單位階級與結果階級不一致`);
+          }
+        }
+        if (outcome.type === 'gain-gold' && (
+          !Number.isInteger(outcome.gold?.minimum)
+          || !Number.isInteger(outcome.gold?.maximum)
+          || outcome.gold.minimum < 0
+          || outcome.gold.maximum < outcome.gold.minimum
+        )) {
+          errors.push(`事件 ${event.id} 的金錢獎勵區間不合法`);
+        }
+        if (outcome.type === 'grant-next-battle-status') {
+          checkReference(STATUSES, outcome.statusId, `事件 ${event.id} 的下場戰鬥狀態`, errors);
+          if (!Number.isInteger(outcome.duration) || outcome.duration < 1) {
+            errors.push(`事件 ${event.id} 的下場戰鬥狀態回合數不合法`);
+          }
+        }
+        if (outcome.type === 'grant-random-reward') {
+          checkReference(LOOT_TABLES, outcome.lootTableId, `事件 ${event.id} 的獎勵掉落表`, errors);
         }
         if (
           outcome.type === 'collector-challenge'

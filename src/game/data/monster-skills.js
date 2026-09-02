@@ -27,6 +27,21 @@ export const MONSTER_SKILLS = createCatalog([
     effects: [],
   },
   {
+    id: 'armor-breaking-strike',
+    name: '破甲攻擊',
+    activation: MonsterSkillActivation.ACTIVE,
+    power: 1,
+    description: '造成基礎傷害100%的傷害，並使玩家獲得2層裝甲破壞。',
+    effects: [{
+      type: 'apply-status',
+      statusId: 'armor-break',
+      target: 'enemy',
+      chance: 1,
+      stacks: 2,
+      potency: 1,
+    }],
+  },
+  {
     id: 'crushing-blow',
     name: '粉碎重擊',
     activation: MonsterSkillActivation.ACTIVE,

@@ -448,6 +448,75 @@ test('奇遇先顯示冒險進度，再顯示不公開名稱的奇遇內文', ()
   );
 });
 
+test('密封石室揭示裝備效果後顯示收下與放回按鈕', () => {
+  const event = getEvent('ruins-sealed-vault');
+  let state = createGame({
+    id: 'vault-render',
+    ownerId: 'player-1',
+    config: { initialEnemyUnitId: 'ruins-sentinel' },
+    monsterRng: () => 0,
+  });
+  state.phase = GamePhase.EVENT;
+  state.enemy = null;
+  state.event = {
+    eventId: event.id,
+    name: event.name,
+    description: event.description,
+    rarity: event.rarity,
+    stage: 'choice',
+    options: event.options.map(({ id, label }) => ({ id, label })),
+    result: null,
+  };
+  state = chooseEventOption(state, 'blood-unseal', {
+    eventRng: () => 0,
+  });
+
+  const payload = renderGame(state);
+  const labels = payload.components.flatMap((row) => (
+    row.components.map((component) => component.label)
+  ));
+
+  assert.match(payload.embeds[0].description, /效果｜/);
+  assert.deepEqual(labels, ['收下裝備', '放回石臺', '放棄遊戲']);
+});
+
+test('年邁探險家的資助按鈕會在金幣不足時停用', () => {
+  const event = getEvent('ruins-aged-explorer');
+  const state = createGame({
+    id: 'aged-explorer-render',
+    ownerId: 'player-1',
+    config: { initialEnemyUnitId: 'ruins-sentinel' },
+    monsterRng: () => 0,
+  });
+  state.phase = GamePhase.EVENT;
+  state.enemy = null;
+  state.player.gold = 29;
+  state.event = {
+    eventId: event.id,
+    name: event.name,
+    description: event.description,
+    rarity: event.rarity,
+    stage: 'choice',
+    options: event.options.map(({ id, label, goldCost }) => ({
+      id,
+      label,
+      ...(goldCost !== undefined ? { goldCost } : {}),
+    })),
+    result: null,
+  };
+
+  const buttons = renderGame(state).components[0].components;
+  assert.equal(buttons.find((entry) => entry.label === '交付30枚金幣').disabled, true);
+  assert.equal(buttons.find((entry) => entry.label === '婉拒並離開').disabled, false);
+
+  state.player.gold = 30;
+  assert.equal(
+    renderGame(state).components[0].components
+      .find((entry) => entry.label === '交付30枚金幣').disabled,
+    false,
+  );
+});
+
 test('神秘商店顯示金錢、下一筆價格、三件商品與技能升級', () => {
   const event = getEvent('ruins-mysterious-shop');
   let state = createGame({

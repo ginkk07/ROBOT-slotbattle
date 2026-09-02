@@ -41,6 +41,7 @@ export const StatusEffectType = Object.freeze({
   HEAL: 'heal',
   SHARE_DAMAGE: 'share-damage',
   REFLECT_DAMAGE: 'reflect-damage',
+  REMOVE_ARMOR_BEFORE_DAMAGE: 'remove-armor-before-damage',
 });
 
 export const STATUS_TRIGGERS = Object.freeze(Object.values(StatusTrigger));
@@ -171,6 +172,20 @@ export const STATUSES = createCatalog([
     defaultDuration: null,
     stacking: { mode: 'stack-potency', maxStacks: 999 },
     effect: { type: StatusEffectType.REFLECT_DAMAGE, amountPerPotency: 1 },
+    bossRule: { mode: BossRuleMode.NORMAL },
+  },
+  {
+    id: 'armor-break',
+    name: '裝甲破壞',
+    emoji: '🔨',
+    description: '戰鬥中生效；每層裝甲破壞會在敵人造成傷害前先移除1點🛡️，層數可累積。',
+    polarity: StatusPolarity.DEBUFF,
+    category: 'armor-break',
+    trigger: StatusTrigger.PASSIVE,
+    durationMode: 'battle',
+    defaultDuration: null,
+    stacking: { mode: 'stack-potency', maxStacks: 999 },
+    effect: { type: StatusEffectType.REMOVE_ARMOR_BEFORE_DAMAGE, amountPerPotency: 1 },
     bossRule: { mode: BossRuleMode.NORMAL },
   },
   {

@@ -63,6 +63,7 @@ import {
 import { resolveEvent } from './engines/event-engine.js';
 import {
   rollCombatRewards,
+  rollRewardChoices,
   rollShopItemChoices,
 } from './engines/loot-engine.js';
 import { selectMonsterIntent } from './engines/monster-action-engine.js';
@@ -156,6 +157,7 @@ export function createGame({
       damageResistances: { ...playerUnit.damageResistances },
       statusOverrides: structuredClone(playerUnit.statusOverrides),
       activeStatuses: [],
+      pendingBattleStatuses: [],
     },
     enemy: null,
     event: null,
@@ -626,6 +628,7 @@ export function endPlayerTurn(
 
   const resolvedRound = next.round;
   const intent = next.enemy.intent ?? selectMonsterIntent(next.enemy, { rng: monsterRng });
+  const armorBroken = removeArmorBeforeIncomingDamage(next);
   const armorUsed = Math.min(next.resources.armor, intent.damage);
   next.resources.armor = Math.max(0, next.resources.armor - armorUsed);
   const incomingAfterArmor = Math.max(0, intent.damage - armorUsed);
@@ -664,6 +667,7 @@ export function endPlayerTurn(
     amount: damageTaken,
     damageSource: DamageSource.EXTRA,
     target: 'self',
+    armorBroken,
     armorUsed,
     passiveDamageBlocked,
   };
@@ -739,6 +743,7 @@ export function endPlayerTurn(
     stunned: wasStunned,
     discardedAction,
     discardedMana,
+    armorBroken,
     armorUsed,
     retainedArmor,
     enemyAction: {
@@ -849,12 +854,18 @@ export function chooseEventOption(
 
   const resolved = resolveEvent(next.event.eventId, optionId, { rng: eventRng });
   const outcome = resolved.outcome;
+  const goldCost = Number(resolved.option.goldCost ?? 0);
+  if (next.player.gold < goldCost) {
+    throw new RangeError(`金錢不足，目前需要 🪙${goldCost}`);
+  }
+  next.player.gold -= goldCost;
   next.history.push({
     type: 'event-option-selected',
     eventId: next.event.eventId,
     optionId,
     outcomeId: outcome.id,
     outcomeType: outcome.type,
+    goldCost,
   });
 
   if (outcome.type === 'full-heal') {
@@ -886,6 +897,27 @@ export function chooseEventOption(
     return next;
   } else if (outcome.type === 'open-shop') {
     beginMysteriousShop(next, outcome, eventRng);
+    return next;
+  } else if (outcome.type === 'gain-gold') {
+    const gold = randomInteger(outcome.gold.minimum, outcome.gold.maximum, eventRng);
+    next.player.gold += gold;
+    next.history.push({
+      type: 'event-gold-gained',
+      eventId: next.event.eventId,
+      gold,
+    });
+    setEventResult(next, outcome, `${outcome.text}\n你獲得 🪙${gold}。`);
+    return next;
+  } else if (outcome.type === 'grant-next-battle-status') {
+    queueNextBattleStatus(next, outcome);
+    setEventResult(
+      next,
+      outcome,
+      `${outcome.text}\n你失去 🪙${goldCost}；下一場戰鬥獲得「${getStatus(outcome.statusId).name}」${outcome.duration}回合。`,
+    );
+    return next;
+  } else if (outcome.type === 'grant-random-reward') {
+    grantRandomEventReward(next, outcome, eventRng);
     return next;
   } else if (outcome.type !== 'continue') {
     throw new RangeError(`尚未支援的事件結果：${outcome.type}`);
@@ -965,6 +997,40 @@ export function chooseEventSkill(
     rewardId: next.event.collector.rewardId,
   });
   resolveCollectorSpin(next, null, eventRng);
+  return next;
+}
+
+/** 處理密封石室揭示裝備後的收下／放回選擇；已支付的生命不會返還。 */
+export function chooseVaultReward(state, choice) {
+  const next = upgradeGameState(state);
+  assertEventStage(next, ['vault-reward-choice']);
+  if (!['accept', 'leave'].includes(choice)) {
+    throw new RangeError('密封石室的裝備選擇不存在');
+  }
+
+  const itemId = next.event.vault?.itemId;
+  if (!itemId) throw new Error('密封石室沒有等待選擇的裝備');
+  const item = getItem(itemId);
+  const accepted = choice === 'accept';
+  if (accepted) {
+    applyReward(next.player, {
+      contentType: 'item',
+      contentId: item.id,
+      acquisition: 'acquire',
+      rarity: item.rarity,
+    });
+  }
+  next.history.push({
+    type: 'event-vault-reward-selected',
+    eventId: next.event.eventId,
+    itemId: item.id,
+    accepted,
+  });
+
+  const text = accepted
+    ? `你收下稀有裝備「${item.name}」，轉身離開石室。`
+    : `你將稀有裝備「${item.name}」放回石臺。封印已經解除，支付的 ${next.event.vault.damage} 點生命不會返還。`;
+  setEventResult(next, next.event.pendingOutcome, text);
   return next;
 }
 
@@ -1109,23 +1175,21 @@ function resolveBloodUnseal(state, outcome, rng) {
   );
   const damage = Math.min(requestedDamage, Math.max(0, state.player.hp - 1));
   state.player.hp -= damage;
-  applyReward(state.player, {
-    contentType: 'item',
-    contentId: item.id,
-    acquisition: 'acquire',
-    rarity: item.rarity,
-  });
   state.history.push({
     type: 'event-blood-unsealed',
     eventId: state.event.eventId,
     damage,
     itemId: item.id,
   });
-  setEventResult(
-    state,
-    outcome,
-    `${outcome.text}\n你失去 ${damage} 點生命，取得稀有裝備「${item.name}」。`,
-  );
+  state.event.stage = 'vault-reward-choice';
+  state.event.pendingOutcome = structuredClone(outcome);
+  state.event.vault = { itemId: item.id, damage };
+  state.event.prompt = [
+    outcome.text,
+    `你失去 ${damage} 點生命。石臺上出現稀有裝備「${item.name}」。`,
+    `效果｜${item.description}`,
+    '你可以收下裝備，或將它放回石臺；已支付的生命不會返還。',
+  ].join('\n');
 }
 
 function beginAncientEchoUpgrade(state, outcome) {
@@ -1377,6 +1441,7 @@ function setEventResult(state, outcome, text) {
   state.event.skillChoices = [];
   state.event.pendingOutcome = null;
   state.event.shop = null;
+  state.event.vault = null;
   state.event.result = {
     outcomeId: outcome.id,
     type: outcome.type,
@@ -1480,7 +1545,11 @@ function startNextNode(state, {
       description: node.event.description,
       rarity: node.rarity,
       stage: 'choice',
-      options: node.event.options.map(({ id, label }) => ({ id, label })),
+      options: node.event.options.map(({ id, label, goldCost }) => ({
+        id,
+        label,
+        ...(goldCost !== undefined ? { goldCost } : {}),
+      })),
       result: null,
     };
     state.history.push({
@@ -1497,6 +1566,7 @@ function startNextNode(state, {
   state.round = 1;
   state.resources.action = playerActionLimit(state);
   activatePendingSkillSeals(state);
+  activatePendingBattleStatuses(state);
   applyBattleStartEquipmentEffects(state);
   applyPlayerTurnStartEquipmentEffects(state);
   state.history.push({
@@ -1516,7 +1586,9 @@ function startEventCombat(state, outcome, { rng, monsterRng }) {
     boss: region.bossEncounterTableId,
   }[outcome.rank];
   if (!tableId) throw new RangeError(`奇遇戰鬥階級不合法：${outcome.rank}`);
-  const unit = drawEncounter(tableId, { rng });
+  const unit = outcome.unitId
+    ? getUnit(outcome.unitId)
+    : drawEncounter(tableId, { rng });
   const enemy = scaleEnemyUnit(unit, state.adventure.regionDepth, region);
   const eventId = state.event.eventId;
 
@@ -1534,6 +1606,7 @@ function startEventCombat(state, outcome, { rng, monsterRng }) {
   state.player.activeStatuses = [];
   state.stunned = false;
   activatePendingSkillSeals(state);
+  activatePendingBattleStatuses(state);
   applyBattleStartEquipmentEffects(state);
   applyPlayerTurnStartEquipmentEffects(state);
   state.lastAction = { type: 'event', text: outcome.text };
@@ -1560,6 +1633,23 @@ function activatePendingSkillSeals(state) {
     state.player.pendingSealedSkillIds ?? [],
   )];
   state.player.pendingSealedSkillIds = [];
+}
+
+function activatePendingBattleStatuses(state) {
+  const pending = state.player.pendingBattleStatuses ?? [];
+  for (const status of pending) {
+    state.player.activeStatuses = mergeActiveStatus(
+      state.player.activeStatuses,
+      status,
+    );
+  }
+  if (pending.length > 0) {
+    state.history.push({
+      type: 'pending-battle-statuses-activated',
+      statuses: structuredClone(pending),
+    });
+  }
+  state.player.pendingBattleStatuses = [];
 }
 
 function awaitCombatVictoryConfirmation(state) {
@@ -1653,6 +1743,7 @@ function finishRun(state, status, defeatedBy) {
   clearTurnResources(state);
   state.player.activeStatuses = [];
   state.player.pendingSealedSkillIds = [];
+  state.player.pendingBattleStatuses = [];
   state.player.inventory = [];
   state.player.equipment = [];
   state.player.skillIds = [];
@@ -1682,6 +1773,54 @@ function applyReward(player, choice) {
   const stack = player.inventory.find((entry) => entry.itemId === item.id);
   if (stack) stack.quantity += 1;
   else player.inventory.push({ itemId: item.id, quantity: 1 });
+}
+
+function queueNextBattleStatus(state, outcome) {
+  const incoming = {
+    statusId: outcome.statusId,
+    sourceUnitId: null,
+    remainingTurns: outcome.duration,
+    stacks: outcome.stacks ?? 1,
+    potency: outcome.potency ?? 1,
+  };
+  state.player.pendingBattleStatuses = mergeActiveStatus(
+    state.player.pendingBattleStatuses,
+    incoming,
+  );
+  state.history.push({
+    type: 'event-next-battle-status-granted',
+    eventId: state.event.eventId,
+    ...incoming,
+  });
+}
+
+function grantRandomEventReward(state, outcome, rng) {
+  const region = getRegion(state.adventure.regionId);
+  const reward = rollRewardChoices(outcome.lootTableId, {
+    rng,
+    regionTags: region.tags,
+    player: state.player,
+  })[0];
+  if (!reward) {
+    setEventResult(
+      state,
+      outcome,
+      `${outcome.text}\n目前沒有符合持有與等級規則的新獎勵。`,
+    );
+    return;
+  }
+
+  applyReward(state.player, reward);
+  state.history.push({
+    type: 'event-random-reward-granted',
+    eventId: state.event.eventId,
+    reward: structuredClone(reward),
+  });
+  setEventResult(
+    state,
+    outcome,
+    `${outcome.text}\n你獲得「${rewardContentName(reward)}」。`,
+  );
 }
 
 function rewardContentName(choice) {
@@ -2113,6 +2252,23 @@ function activeStatusValue(unit, statusId) {
     .reduce((total, active) => total + (
       Number(active.stacks ?? 1) * Number(active.potency ?? 1)
     ), 0);
+}
+
+function removeArmorBeforeIncomingDamage(state) {
+  const requested = (state.player.activeStatuses ?? []).reduce((total, active) => {
+    const definition = getStatus(active.statusId);
+    if (definition.effect.type !== StatusEffectType.REMOVE_ARMOR_BEFORE_DAMAGE) {
+      return total;
+    }
+    return total + (
+      Number(definition.effect.amountPerPotency ?? 0)
+      * Number(active.stacks ?? 1)
+      * Number(active.potency ?? 1)
+    );
+  }, 0);
+  const amount = Math.min(state.resources.armor, Math.max(0, requested));
+  state.resources.armor -= amount;
+  return amount;
 }
 
 function resolveAfterSpinDamageEquipment(
@@ -2559,6 +2715,7 @@ function ensureCurrentFields(state) {
   state.player.gold = Math.max(0, Math.floor(Number(state.player.gold ?? 0)));
   state.player.activeStatuses ??= [];
   state.player.pendingSealedSkillIds ??= [];
+  state.player.pendingBattleStatuses ??= [];
   state.player.inventory ??= [];
   state.player.equipment = normalizeEquipmentIds(state.player.equipment);
   state.combatModifiers = {
@@ -2586,7 +2743,11 @@ function ensureCurrentFields(state) {
   if (state.event) {
     const definition = getEvent(state.event.eventId);
     state.event.stage ??= 'choice';
-    state.event.options ??= definition.options.map(({ id, label }) => ({ id, label }));
+    state.event.options ??= definition.options.map(({ id, label, goldCost }) => ({
+      id,
+      label,
+      ...(goldCost !== undefined ? { goldCost } : {}),
+    }));
     state.event.result ??= null;
     state.event.skillChoices ??= [];
     if (state.event.stage === 'shop') {

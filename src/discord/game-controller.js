@@ -13,6 +13,7 @@ import {
   chooseEventSkill,
   chooseReward,
   chooseEventOption,
+  chooseVaultReward,
   completeEvent,
   confirmCombatVictory,
   continueWithoutReward,
@@ -346,6 +347,9 @@ function nextStateForAction(state, { action, value }, rngs) {
     return chooseEventSkill(state, value, {
       eventRng: rngs.eventRng,
     });
+  }
+  if (action === 'event-vault-reward') {
+    return chooseVaultReward(state, value);
   }
   if (action === 'event-collector-spin') {
     return spinCollectorEvent(state, value, {

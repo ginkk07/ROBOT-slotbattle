@@ -19,6 +19,7 @@ import { getMonsterActionRule } from '../src/game/data/monster-actions.js';
 import { selectMonsterIntent } from '../src/game/engines/monster-action-engine.js';
 import { getUnit } from '../src/game/data/units.js';
 import { getItem } from '../src/game/data/items.js';
+import { EVENTS } from '../src/game/data/events.js';
 
 test('普通與菁英遭遇表只會抽出指定階級', () => {
   const normal = drawEncounter('ruins-normal-encounter', { rng: () => 0 });
@@ -91,19 +92,21 @@ test('奇遇稀有度在60%與90%邊界依序切換普通、稀有、傳說', ()
   assert.equal(legendary.rarity, 'legendary');
 });
 
-test('廢棄營地與神秘收藏家已加入奇遇抽選池', () => {
-  const progress = createAdventureProgress();
-  progress.completedEncounters = 1;
-
-  const camp = drawNextAdventureNode(progress, {
-    rng: sequence([0, 0.599, 0.999]),
-  });
-  const collector = drawNextAdventureNode(progress, {
-    rng: sequence([0, 0.9, 0.999]),
-  });
-
-  assert.equal(camp.event.id, 'ruins-abandoned-camp');
-  assert.equal(collector.event.id, 'ruins-mysterious-collector');
+test('遺跡奇遇池包含既有與新增奇遇', () => {
+  assert.deepEqual(
+    Object.keys(EVENTS),
+    [
+      'ruins-mysterious-spring',
+      'ruins-sealed-vault',
+      'ruins-mysterious-shop',
+      'ruins-abandoned-camp',
+      'ruins-disordered-footprints',
+      'ruins-aged-explorer',
+      'ruins-ornate-chest',
+      'ruins-ancient-echo',
+      'ruins-mysterious-collector',
+    ],
+  );
 });
 
 test('戰鬥獎勵稀有度修正不會改變奇遇稀有度或怪物階級', () => {

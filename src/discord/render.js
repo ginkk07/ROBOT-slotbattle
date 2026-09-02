@@ -295,7 +295,26 @@ function eventControls(state) {
         customId: gameCustomId(state.id, 'event-option', option.id),
         label: option.label,
         style: BUTTON_STYLE.PRIMARY,
+        disabled: Number(option.goldCost ?? 0) > state.player.gold,
       }))),
+      actionRow([abandonButton(state.id)]),
+    ];
+  }
+
+  if (event.stage === 'vault-reward-choice') {
+    return [
+      actionRow([
+        button({
+          customId: gameCustomId(state.id, 'event-vault-reward', 'accept'),
+          label: '收下裝備',
+          style: BUTTON_STYLE.SUCCESS,
+        }),
+        button({
+          customId: gameCustomId(state.id, 'event-vault-reward', 'leave'),
+          label: '放回石臺',
+          style: BUTTON_STYLE.SECONDARY,
+        }),
+      ]),
       actionRow([abandonButton(state.id)]),
     ];
   }

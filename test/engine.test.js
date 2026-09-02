@@ -7,6 +7,7 @@ import {
   activateSkill,
   chooseEventSkill,
   chooseEventOption,
+  chooseVaultReward,
   chooseReward,
   completeEvent,
   confirmCombatVictory,
@@ -71,7 +72,11 @@ function eventState(eventId, skillIds = ['power-strike']) {
     rarity: event.rarity,
     description: event.description,
     stage: 'choice',
-    options: event.options.map(({ id, label }) => ({ id, label })),
+    options: event.options.map(({ id, label, goldCost }) => ({
+      id,
+      label,
+      ...(goldCost !== undefined ? { goldCost } : {}),
+    })),
     result: null,
   };
   return state;
@@ -563,7 +568,29 @@ test('神秘泉水有20%機率回滿生命後進入菁英戰鬥，整個奇遇�
   assert.equal(state.adventure.completedEncounters, 1);
 });
 
-test('密封石室最多扣除最大生命20%且最低保留1HP，並取得未持有的稀有裝備', () => {
+test('密封石室支付最大生命50%後揭示稀有裝備，收下時才取得', () => {
+  let state = eventState('ruins-sealed-vault');
+  state = chooseEventOption(state, 'blood-unseal', {
+    eventRng: sequence([0, 0]),
+  });
+
+  assert.equal(state.player.hp, 23);
+  assert.equal(state.event.stage, 'vault-reward-choice');
+  assert.equal(state.event.vault.damage, 22);
+  assert.match(state.event.prompt, /失去 22 點生命/);
+  assert.match(state.event.prompt, /效果｜/);
+  assert.equal(state.player.equipment.length, 0);
+
+  const itemId = state.event.vault.itemId;
+  state = chooseVaultReward(state, 'accept');
+
+  assert.equal(state.player.equipment.length, 1);
+  assert.equal(state.player.equipment[0], itemId);
+  assert.equal(getItem(itemId).rarity, 'rare');
+  assert.match(state.event.result.text, /收下稀有裝備/);
+});
+
+test('密封石室可放回揭示裝備，生命最低保留1且不會返還', () => {
   let state = eventState('ruins-sealed-vault');
   state.player.hp = 8;
   state = chooseEventOption(state, 'blood-unseal', {
@@ -571,9 +598,14 @@ test('密封石室最多扣除最大生命20%且最低保留1HP，並取得未�
   });
 
   assert.equal(state.player.hp, 1);
-  assert.equal(state.player.equipment.length, 1);
-  assert.equal(getItem(state.player.equipment[0]).rarity, 'rare');
-  assert.match(state.event.result.text, /失去 7 點生命/);
+  assert.equal(state.event.vault.damage, 7);
+
+  state = chooseVaultReward(state, 'leave');
+
+  assert.equal(state.player.hp, 1);
+  assert.equal(state.player.equipment.length, 0);
+  assert.equal(state.event.stage, 'result');
+  assert.match(state.event.result.text, /放回石臺.*7 點生命不會返還/);
 });
 
 test('廢棄營地伏擊會直接進入普通戰鬥且不恢復生命', () => {
@@ -587,6 +619,113 @@ test('廢棄營地伏擊會直接進入普通戰鬥且不恢復生命', () => {
   assert.equal(state.phase, GamePhase.PLAYER_TURN);
   assert.equal(state.enemy.rank, 'normal');
   assert.equal(state.player.hp, 9);
+});
+
+test('雜亂足跡有50%取得20～30金幣，另50%進入普通戰鬥', () => {
+  let rewardState = eventState('ruins-disordered-footprints');
+  rewardState = chooseEventOption(rewardState, 'follow', {
+    eventRng: sequence([0, 0.999]),
+  });
+  assert.equal(rewardState.player.gold, 30);
+  assert.match(rewardState.event.result.text, /獲得 🪙30/);
+
+  let combatState = eventState('ruins-disordered-footprints');
+  combatState = chooseEventOption(combatState, 'follow', {
+    eventRng: sequence([0.75, 0, 0]),
+    monsterRng: zero,
+  });
+  assert.equal(combatState.phase, GamePhase.PLAYER_TURN);
+  assert.equal(combatState.enemy.rank, 'normal');
+});
+
+test('年邁探險家收取30金幣，下一場戰鬥給予攻擊力＋3共9回合', () => {
+  const insufficient = eventState('ruins-aged-explorer');
+  insufficient.player.gold = 29;
+  assert.throws(
+    () => chooseEventOption(insufficient, 'fund', { eventRng: zero }),
+    /金錢不足.*30/,
+  );
+
+  let state = eventState('ruins-aged-explorer');
+  state.player.gold = 30;
+  state = chooseEventOption(state, 'fund', { eventRng: zero });
+  assert.equal(state.player.gold, 0);
+  assert.equal(state.player.pendingBattleStatuses[0].statusId, 'bounty-attack-up');
+  assert.equal(state.player.pendingBattleStatuses[0].remainingTurns, 9);
+
+  state = completeEvent(state, {
+    worldRng: sequence([0.99, 0.99, 0, 0]),
+    monsterRng: zero,
+  });
+  assert.equal(state.player.pendingBattleStatuses.length, 0);
+  assert.equal(state.player.activeStatuses[0].statusId, 'bounty-attack-up');
+  assert.equal(state.player.activeStatuses[0].remainingTurns, 9);
+
+  state = placeBet(state, 1, { reels: [ATTACK, DEFENSE, SKILL] });
+  assert.equal(state.lastImpact.attackDamage, 4);
+});
+
+test('華麗寶箱可取得物品或技能卷軸，60%分支會遭遇指定寶箱怪', () => {
+  let itemState = eventState('ruins-ornate-chest');
+  itemState = chooseEventOption(itemState, 'open', {
+    eventRng: sequence([0, 0, 0]),
+  });
+  assert.equal(itemState.event.stage, 'result');
+  assert.equal(
+    itemState.player.equipment.length + itemState.player.inventory.length,
+    1,
+  );
+
+  let skillState = eventState('ruins-ornate-chest');
+  skillState = chooseEventOption(skillState, 'open', {
+    eventRng: sequence([0.9, 0, 0]),
+  });
+  assert.equal(skillState.event.stage, 'result');
+  assert.match(skillState.event.result.text, /技能卷軸/);
+
+  let mimicState = eventState('ruins-ornate-chest');
+  mimicState = chooseEventOption(mimicState, 'open', {
+    eventRng: sequence([0.5]),
+    monsterRng: sequence([0.5, 0]),
+  });
+  assert.equal(mimicState.phase, GamePhase.PLAYER_TURN);
+  assert.equal(mimicState.enemy.unitId, 'ruins-mimic');
+  assert.equal(mimicState.enemy.maxHp, 75);
+  assert.equal(mimicState.enemy.baseDamage, 12);
+  assert.equal(mimicState.enemy.intent.skillId, 'armor-breaking-strike');
+});
+
+test('破甲攻擊附加2層裝甲破壞，無護甲時保留並在後續攻擊先移除護甲', () => {
+  let state = eventState('ruins-ornate-chest');
+  state = chooseEventOption(state, 'open', {
+    eventRng: sequence([0.5]),
+    monsterRng: sequence([0.5, 0]),
+  });
+  state.resources.armor = 0;
+  state = endPlayerTurn(state, {
+    monsterRng: sequence([0, 0.5, 0]),
+  });
+  assert.equal(state.lastResolution.armorBroken, 0);
+  assert.equal(state.lastResolution.armorUsed, 0);
+  assert.equal(state.lastResolution.damageTaken, 12);
+  assert.equal(state.player.activeStatuses[0].statusId, 'armor-break');
+  assert.equal(state.player.activeStatuses[0].stacks, 2);
+
+  state.resources.armor = 0;
+  state = endPlayerTurn(state, {
+    monsterRng: sequence([0, 0]),
+  });
+  assert.equal(state.lastResolution.armorBroken, 0);
+  assert.equal(state.player.activeStatuses[0].stacks, 4);
+
+  state.resources.armor = 5;
+  state = endPlayerTurn(state, {
+    monsterRng: zero,
+  });
+  assert.equal(state.lastResolution.armorBroken, 4);
+  assert.equal(state.lastResolution.armorUsed, 1);
+  assert.equal(state.lastResolution.damageTaken, 11);
+  assert.equal(state.player.activeStatuses[0].stacks, 4);
 });
 
 test('遠古回響降低20%最大生命並讓玩家選擇一項未滿級技能提升', () => {

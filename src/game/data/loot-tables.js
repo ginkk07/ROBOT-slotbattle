@@ -25,6 +25,22 @@ export const LOOT_TABLES = createCatalog([
     rarityWeights: { common: 0, rare: 50, legendary: 50 },
     gold: { minimum: 60, maximum: 80 },
   },
+  {
+    id: 'ruins-ornate-chest-item',
+    choices: 1,
+    dropChance: 1,
+    contentTypes: ['equipment', 'consumable'],
+    rarityWeights: { common: 70, rare: 29, legendary: 1 },
+    gold: { minimum: 0, maximum: 0 },
+  },
+  {
+    id: 'ruins-ornate-chest-skill',
+    choices: 1,
+    dropChance: 1,
+    contentTypes: ['skill'],
+    rarityWeights: { common: 70, rare: 29, legendary: 1 },
+    gold: { minimum: 0, maximum: 0 },
+  },
 ], '掉落表');
 
 export function getLootTable(lootTableId) {
