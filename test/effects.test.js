@@ -80,7 +80,7 @@ test('Boss護甲強化會降低火焰炸彈傷害並附加3層燃燒', () => {
     effects: getItem('fire-bomb').effects,
     source: state.player,
     target: state.enemy,
-    damageSource: DamageSource.ITEM,
+    damageSource: DamageSource.EXTRA,
     rng: () => 0,
   });
 
@@ -154,8 +154,8 @@ test('可疊加狀態遵守最大層數', () => {
     potency: 2,
   });
 
-  assert.equal(merged[0].stacks, 5);
-  assert.equal(merged[0].remainingTurns, 5);
+  assert.equal(merged[0].stacks, 6);
+  assert.equal(merged[0].remainingTurns, 6);
   assert.equal(merged[0].potency, 2);
 });
 

@@ -139,7 +139,7 @@ export function scaleEnemyUnit(unit, depth, region = getRegion('ruins')) {
       effects: skill.effects ?? [],
       source: enemy,
       target: enemy,
-      damageSource: DamageSource.SKILL,
+      damageSource: DamageSource.EXTRA,
       rng: () => 0,
     });
     enemy = result.source;

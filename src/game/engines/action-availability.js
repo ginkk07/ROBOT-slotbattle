@@ -21,6 +21,9 @@ export function skillActionAvailability(state, skillId) {
   const level = playerSkillLevel(state.player, skillId);
 
   if (level < 1) return blocked('這個技能不在目前持有的技能中');
+  if (state.combatModifiers?.sealedSkillIds?.includes(skillId)) {
+    return blocked('這項技能在本場戰鬥遭到封印');
+  }
   if (skillActivation(skill) === SkillActivation.PASSIVE) {
     return blocked('被動技能會自動生效');
   }

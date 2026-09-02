@@ -82,9 +82,9 @@ test('玩家技能與道具共用effects，怪物技能使用獨立資料庫', (
   );
   assert.deepEqual(
     getSkill('flame-impact').levels.map((level) => level.effects[1].stacks),
-    [3, 4, 5],
+    [5, 10, 15],
   );
-  assert.match(getSkillLevelDefinition('flame-impact', 3).description, /5 層燃燒/);
+  assert.match(getSkillLevelDefinition('flame-impact', 3).description, /15 層燃燒/);
   assert.equal(getItem('healing-potion').actionCost, 0);
   assert.equal(getItem('sword').type, 'equipment');
   assert.equal(
@@ -152,6 +152,8 @@ test('玩家技能與道具共用effects，怪物技能使用獨立資料庫', (
   assert.equal(getStatus('attack-up').stacking.mode, 'stack-potency');
   assert.equal(getStatus('burning').trigger, 'turn-start');
   assert.equal(getStatus('burning').stacking.mode, 'stack-countdown');
+  assert.equal(getStatus('damage-reflection').durationMode, 'battle');
+  assert.equal(getStatus('curse').effect.type, 'share-damage');
 });
 
 test('資料定義為唯讀，戰鬥不能誤改原始資料庫', () => {
@@ -163,9 +165,9 @@ test('可調整的全域平衡規則集中在資料層', () => {
   const region = getRegion('ruins');
 
   assert.deepEqual(EVENT_RULES.rarityWeights, {
-    common: 50,
+    common: 60,
     rare: 30,
-    legendary: 20,
+    legendary: 10,
   });
   assert.equal(getMonsterActionRule('normal').basicAttackChance, 0.6);
   assert.equal(getMonsterActionRule('boss').requiredSkillCount, 3);

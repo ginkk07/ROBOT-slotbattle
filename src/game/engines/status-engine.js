@@ -73,7 +73,12 @@ export function mergeActiveStatus(activeStatuses, incoming) {
 
   const current = next[index];
   if (definition.durationMode === 'battle') {
-    current.stacks = 1;
+    current.stacks = definition.stacking.mode === 'stack-potency'
+      ? Math.min(
+        definition.stacking.maxStacks,
+        Number(current.stacks ?? 1) + Number(incoming.stacks ?? 1),
+      )
+      : 1;
     current.potency = Math.max(current.potency, incoming.potency);
     current.remainingTurns = null;
   } else if (definition.stacking.mode === 'until-consumed') {

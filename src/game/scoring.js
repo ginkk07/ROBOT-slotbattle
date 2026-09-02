@@ -15,7 +15,11 @@ export function countSymbols(reels) {
   );
 }
 
-export function scoreSpin(reels, wager, { promoteWithLucky = false } = {}) {
+export function scoreSpin(
+  reels,
+  wager,
+  { promoteWithLucky = false, unluckyActsAsLucky = false } = {},
+) {
   if (!Number.isInteger(wager) || wager < 1) {
     throw new RangeError('投入的行動點必須是大於0的整數');
   }
@@ -23,18 +27,8 @@ export function scoreSpin(reels, wager, { promoteWithLucky = false } = {}) {
   const counts = countSymbols(reels);
   const stunned = counts[SymbolId.UNLUCKY] === 3;
 
-  if (stunned) {
-    return {
-      reels: [...reels],
-      wager,
-      counts,
-      stunned: true,
-      base: { attack: 0, defense: 0, skill: 0 },
-      awarded: { attack: 0, defense: 0, skill: 0 },
-    };
-  }
-
-  const luckyValue = COMBO_VALUE[counts[SymbolId.LUCKY]];
+  const luckyValue = COMBO_VALUE[counts[SymbolId.LUCKY]]
+    + (unluckyActsAsLucky ? COMBO_VALUE[counts[SymbolId.UNLUCKY]] : 0);
   const comboValue = (symbolId) => {
     const count = counts[symbolId];
     // 幸運蘿蔔只提升實際出現的⚔️／🛡️／✨，🍀原有效果另外保留。
@@ -43,17 +37,20 @@ export function scoreSpin(reels, wager, { promoteWithLucky = false } = {}) {
       : count;
     return COMBO_VALUE[promotedCount];
   };
-  const base = {
-    attack: comboValue(SymbolId.ATTACK) + luckyValue,
-    defense: comboValue(SymbolId.DEFENSE) + luckyValue,
-    skill: comboValue(SymbolId.SKILL) + luckyValue,
-  };
+  // 一般三個💀仍是0收益；惡魔之血則保留暈眩，但讓💀同時提供🍀收益。
+  const base = stunned && !unluckyActsAsLucky
+    ? { attack: 0, defense: 0, skill: 0 }
+    : {
+      attack: comboValue(SymbolId.ATTACK) + luckyValue,
+      defense: comboValue(SymbolId.DEFENSE) + luckyValue,
+      skill: comboValue(SymbolId.SKILL) + luckyValue,
+    };
 
   return {
     reels: [...reels],
     wager,
     counts,
-    stunned: false,
+    stunned,
     base,
     awarded: {
       attack: base.attack * wager,

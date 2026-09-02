@@ -1,6 +1,8 @@
 import { getSkill } from '../src/game/data/skills.js';
+import { skillActionAvailability } from '../src/game/engines/action-availability.js';
 import {
   activateSkill,
+  chooseEventSkill,
   chooseEventOption,
   chooseReward,
   completeEvent,
@@ -12,6 +14,7 @@ import {
   GameStatus,
   isStunned,
   placeBet,
+  spinCollectorEvent,
 } from '../src/game/engine.js';
 
 const requestedRuns = Number.parseInt(process.argv[2] ?? '100', 10);
@@ -70,15 +73,29 @@ function simulate(strategy, iterations, turnLimit) {
         continue;
       }
       if (state.phase === GamePhase.EVENT) {
-        state = state.event.stage === 'choice'
-          ? chooseEventOption(state, state.event.options[0].id, {
+        if (state.event.stage === 'choice') {
+          state = chooseEventOption(state, state.event.options[0].id, {
             eventRng: probabilityRng,
             monsterRng: probabilityRng,
-          })
-          : completeEvent(state, {
+          });
+        } else if ([
+          'skill-upgrade-choice',
+          'collector-wager-choice',
+          'collector-replace-choice',
+        ].includes(state.event.stage)) {
+          state = chooseEventSkill(state, state.event.skillChoices[0], {
+            eventRng: probabilityRng,
+          });
+        } else if (state.event.stage === 'collector-spin') {
+          state = spinCollectorEvent(state, 'none', {
+            eventRng: probabilityRng,
+          });
+        } else {
+          state = completeEvent(state, {
             worldRng: probabilityRng,
             monsterRng: probabilityRng,
           });
+        }
         continue;
       }
 
@@ -135,6 +152,7 @@ function useHealingWhenPossible(state) {
     && !isStunned(next)
     && next.player.hp < next.player.maxHp
     && next.resources.mana >= skill.cost
+    && skillActionAvailability(next, skillId).usable
   ) {
     next = activateSkill(next, skillId, { rewardRng: probabilityRng });
   }

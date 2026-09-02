@@ -40,7 +40,7 @@ function battle(itemIds = [], {
 }
 
 test('新增道具完整收錄，且多件裝備會同時持有與生效', () => {
-  assert.equal(Object.keys(ITEMS).length, 27);
+  assert.equal(Object.keys(ITEMS).length, 38);
 
   const state = battle(['sword', 'iron-shield', 'vip-membership']);
   assert.deepEqual(state.player.equipment, [
@@ -67,13 +67,15 @@ test('可頌與鐵盾在每個玩家回合開始時各觸發一次', () => {
   assert.equal(state.resources.armor, 5);
 });
 
-test('手裡劍增加拉霸攻擊傷害，賭徒左手在全額投入時乘2', () => {
+test('手裡劍額外傷害不受賭徒左手倍率影響', () => {
   let state = battle(['shuriken', 'gamblers-left-hand']);
   state = placeBet(state, 4, { reels: [ATTACK, DEFENSE, SKILL] });
 
-  assert.equal(state.lastImpact.attackDamage, 10);
+  assert.equal(state.lastImpact.spinDamage, 8);
+  assert.equal(state.lastImpact.additionalDamage, 1);
+  assert.equal(state.lastImpact.attackDamage, 9);
   assert.equal(state.lastImpact.damageMultiplier, 2);
-  assert.equal(state.enemy.hp, 490);
+  assert.equal(state.enemy.hp, 491);
 });
 
 test('符文魔方與星星法杖每次拉霸最多各觸發一次', () => {
@@ -184,11 +186,11 @@ test('傳說燃焰之劍在拉霸造成傷害後加燃燒並依目前層數追�
   assert.equal(state.lastImpact.spinDamage, 1);
   assert.equal(state.lastImpact.skillDamage, 1);
   assert.equal(state.combatModifiers.damageDealtBySource.spin, 1);
-  assert.equal(state.combatModifiers.damageDealtBySource.skill, 1);
+  assert.equal(state.combatModifiers.damageDealtBySource.extra, 1);
   assert.equal(
     state.history.at(-1).equipmentEvents.find((event) => event.type === 'damage')
       .damageSource,
-    DamageSource.SKILL,
+    DamageSource.EXTRA,
   );
   assert.equal(state.enemy.activeStatuses[0].stacks, 1);
 
@@ -200,7 +202,7 @@ test('傳說燃焰之劍在拉霸造成傷害後加燃燒並依目前層數追�
   assert.equal(state.lastImpact.spinDamage, 1);
   assert.equal(state.lastImpact.skillDamage, 2);
   assert.equal(state.combatModifiers.damageDealtBySource.spin, 2);
-  assert.equal(state.combatModifiers.damageDealtBySource.skill, 3);
+  assert.equal(state.combatModifiers.damageDealtBySource.extra, 3);
   assert.equal(state.enemy.activeStatuses[0].stacks, 2);
 });
 
@@ -209,7 +211,7 @@ test('磨刀石只提高下一次拉霸的攻擊牌面，藥劑與魔菇立即�
   state = useItem(state, 'hardening-potion');
   state = useItem(state, 'magic-mushroom');
   state = useItem(state, 'whetstone');
-  assert.equal(state.resources.armor, 20);
+  assert.equal(state.resources.armor, 15);
   assert.equal(state.resources.mana, 5);
   assert.equal(state.combatModifiers.nextSpinSymbolChances.attack, 0.5);
 

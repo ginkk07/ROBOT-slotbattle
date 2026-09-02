@@ -49,7 +49,7 @@ test('完成4次遭遇後，第5次先以28%機率判定Boss', () => {
   assert.equal(node.enemy.rank, 'boss');
 });
 
-test('Boss判定失敗後才以20%機率抽取奇遇，奇遇稀有度固定50/30/20', () => {
+test('Boss判定失敗後才以20%機率抽取奇遇，奇遇稀有度固定60/30/10', () => {
   const progress = createAdventureProgress();
   progress.regionProgress = 4;
   progress.completedEncounters = 4;
@@ -60,6 +60,25 @@ test('Boss判定失敗後才以20%機率抽取奇遇，奇遇稀有度固定50/3
   assert.equal(node.type, 'event');
   assert.equal(node.rarity, 'rare');
   assert.equal(node.event.id, 'ruins-sealed-vault');
+});
+
+test('奇遇稀有度在60%與90%邊界依序切換普通、稀有、傳說', () => {
+  const progress = createAdventureProgress();
+  progress.completedEncounters = 1;
+
+  const common = drawNextAdventureNode(progress, {
+    rng: sequence([0, 0.599, 0]),
+  });
+  const rare = drawNextAdventureNode(progress, {
+    rng: sequence([0, 0.6, 0]),
+  });
+  const legendary = drawNextAdventureNode(progress, {
+    rng: sequence([0, 0.9, 0]),
+  });
+
+  assert.equal(common.rarity, 'common');
+  assert.equal(rare.rarity, 'rare');
+  assert.equal(legendary.rarity, 'legendary');
 });
 
 test('戰鬥獎勵稀有度修正不會改變奇遇稀有度或怪物階級', () => {

@@ -95,12 +95,8 @@ export function promotesSymbolsWithLucky(player) {
 }
 
 export function spinDamageModifiers(player, { wager, actionLimit }) {
-  let bonusDamage = 0;
   let multiplier = 1;
   for (const { effect } of equipmentEffectEntries(player, ItemEffectTrigger.SPIN_DAMAGE)) {
-    if (effect.type === ItemEffectType.BONUS_DAMAGE) {
-      bonusDamage += effect.amount;
-    }
     if (
       effect.type === ItemEffectType.MULTIPLY_DAMAGE
       && (!effect.wagerEqualsActionLimit || wager === actionLimit)
@@ -108,7 +104,136 @@ export function spinDamageModifiers(player, { wager, actionLimit }) {
       multiplier *= effect.multiplier;
     }
   }
-  return { bonusDamage, multiplier };
+  return { multiplier };
+}
+
+/** 額外傷害至少為1時，元素瓶等裝備才會加入固定值。 */
+export function extraDamageAmount(player, amount) {
+  if (!Number.isFinite(amount) || amount <= 0) return 0;
+  const bonus = equipmentEffectEntries(
+    player,
+    ItemEffectTrigger.EXTRA_DAMAGE,
+    ItemEffectType.BONUS_DAMAGE,
+  ).reduce((total, { effect }) => total + Number(effect.amount ?? 0), 0);
+  return amount + bonus;
+}
+
+/** 治療倍率依裝備資料套用，最後依指定規則取整。 */
+export function healingAmount(player, amount) {
+  let resolved = Number(amount);
+  for (const { effect } of equipmentEffectEntries(
+    player,
+    ItemEffectTrigger.HEALING_AMOUNT,
+    ItemEffectType.MULTIPLY_HEALING,
+  )) {
+    resolved *= Number(effect.multiplier ?? 1);
+    resolved = effect.rounding === 'round' ? Math.round(resolved) : Math.floor(resolved);
+  }
+  return resolved;
+}
+
+export function reduceDamageBySource(player, damageSource, damage) {
+  let reduced = Number(damage);
+  for (const { effect } of equipmentEffectEntries(
+    player,
+    ItemEffectTrigger.DAMAGE_TAKEN,
+    ItemEffectType.REDUCE_DAMAGE_SOURCE,
+  )) {
+    if (effect.damageSource !== damageSource) continue;
+    reduced = Math.max(0, reduced - Number(effect.amount ?? 0));
+  }
+  return reduced;
+}
+
+export function treatsSymbolAsLucky(player, symbolId) {
+  return equipmentEffectEntries(
+    player,
+    ItemEffectTrigger.AFTER_SPIN,
+    ItemEffectType.TREAT_SYMBOL_AS_LUCKY,
+  ).some(({ effect }) => effect.symbolId === symbolId);
+}
+
+/** 將惡魔之血等「至少出現N張」效果套到已抽出的牌面。 */
+export function ensureMinimumSymbols(
+  player,
+  reels,
+  { rng = Math.random } = {},
+) {
+  const next = [...reels];
+  for (const { effect } of equipmentEffectEntries(
+    player,
+    ItemEffectTrigger.SYMBOL_ROLL,
+    ItemEffectType.MINIMUM_SYMBOL_COUNT,
+  )) {
+    const required = Number(effect.count ?? 0);
+    let current = next.filter((symbolId) => symbolId === effect.symbolId).length;
+    while (current < required) {
+      const candidates = next
+        .map((symbolId, index) => ({ symbolId, index }))
+        .filter(({ symbolId }) => symbolId !== effect.symbolId);
+      if (candidates.length === 0) break;
+      const roll = rng();
+      if (!Number.isFinite(roll) || roll < 0 || roll >= 1) {
+        throw new RangeError('保證牌面 rng 必須回傳0（含）到1（不含）的數字');
+      }
+      const selected = candidates[Math.floor(roll * candidates.length)];
+      next[selected.index] = effect.symbolId;
+      current += 1;
+    }
+  }
+  return next;
+}
+
+/** 電擊裝置等每場限定效果在實際攔截狀態時才消耗次數。 */
+export function consumeStatusRemovalEquipment(state, statusId) {
+  state.combatModifiers.usedOnceEquipmentEffects ??= {};
+  for (const { itemId, effect } of equipmentEffectEntries(
+    state.player,
+    ItemEffectTrigger.STATUS_APPLIED,
+    ItemEffectType.REMOVE_STATUS_ONCE,
+  )) {
+    if (effect.statusId !== statusId) continue;
+    const key = `${itemId}:${effect.type}:${statusId}`;
+    const used = Number(state.combatModifiers.usedOnceEquipmentEffects[key] ?? 0);
+    if (used >= Number(effect.usesPerBattle ?? 1)) continue;
+    state.combatModifiers.usedOnceEquipmentEffects[key] = used + 1;
+    return { type: 'remove-status', itemId, statusId, removed: 1, automatic: true };
+  }
+  return null;
+}
+
+/** 手裡劍每拉一次累積1層，該次就以累積值建立一筆額外傷害。 */
+export function progressiveSpinExtraDamageRequests(state) {
+  state.combatModifiers.progressiveSpinExtraDamage ??= {};
+  const requests = [];
+  for (const { itemId, effect } of equipmentEffectEntries(
+    state.player,
+    ItemEffectTrigger.AFTER_SPIN,
+    ItemEffectType.INCREASE_EXTRA_DAMAGE_EACH_SPIN,
+  )) {
+    const amount = Number(state.combatModifiers.progressiveSpinExtraDamage[itemId] ?? 0)
+      + Number(effect.amount ?? 0);
+    state.combatModifiers.progressiveSpinExtraDamage[itemId] = amount;
+    requests.push({ itemId, amount, element: effect.element ?? 'physical' });
+  }
+  return requests;
+}
+
+/** 血蛭等效果每回合第一次有效拉霸傷害才回傳治療量。 */
+export function firstSpinDamageHealingRequests(state) {
+  state.combatModifiers.usedTurnEquipmentEffects ??= {};
+  const requests = [];
+  for (const { itemId, effect } of equipmentEffectEntries(
+    state.player,
+    ItemEffectTrigger.AFTER_SPIN_DAMAGE,
+    ItemEffectType.HEAL_ON_FIRST_SPIN_DAMAGE,
+  )) {
+    const key = `${itemId}:${effect.type}`;
+    if (state.combatModifiers.usedTurnEquipmentEffects[key]) continue;
+    state.combatModifiers.usedTurnEquipmentEffects[key] = true;
+    requests.push({ itemId, amount: Number(effect.amount ?? 0) });
+  }
+  return requests;
 }
 
 export function reduceIncomingDamageWithEquipment(player, damage) {
@@ -123,34 +248,6 @@ export function reduceIncomingDamageWithEquipment(player, damage) {
     }
   }
   return reduced;
-}
-
-/**
- * 敵人攻擊結束後，將實際消耗的資源交給對應裝備產生傷害請求。
- * 荊棘只是一筆「消耗護甲轉傷害」資料，戰鬥流程不辨識道具 ID。
- */
-export function afterEnemyAttackEquipmentDamageRequests(
-  player,
-  spentResources = {},
-) {
-  const requests = [];
-  for (const { itemId, effect } of equipmentEffectEntries(
-    player,
-    ItemEffectTrigger.AFTER_ENEMY_ATTACK,
-    ItemEffectType.DAMAGE_FROM_SPENT_RESOURCE,
-  )) {
-    const spent = Number(spentResources[effect.resource] ?? 0);
-    const amount = Math.floor(spent * Number(effect.multiplier ?? 1));
-    if (amount <= 0) continue;
-    requests.push({
-      itemId,
-      resource: effect.resource,
-      spent,
-      amount,
-      element: effect.element,
-    });
-  }
-  return requests;
 }
 
 export function healingResourceBonus(player, healEvents) {
@@ -203,7 +300,12 @@ export function afterSpinEquipmentBonuses(
 
     if (effect.type === ItemEffectType.BONUS_DAMAGE) {
       bonusDamage += effect.amount;
-      events.push({ type: 'bonus-damage', itemId, amount: effect.amount });
+      events.push({
+        type: 'bonus-damage',
+        itemId,
+        amount: effect.amount,
+        element: effect.element,
+      });
       continue;
     }
 
@@ -227,7 +329,11 @@ export function afterSpinEquipmentBonuses(
   return { resources, bonusDamage, events };
 }
 
-export function applyTriggeredEquipmentEffects(state, trigger) {
+export function applyTriggeredEquipmentEffects(
+  state,
+  trigger,
+  { healAmountResolver = (amount) => amount } = {},
+) {
   const events = [];
   for (const { itemId, effect } of equipmentEffectEntries(state.player, trigger)) {
     if (effect.enemyRanks && !effect.enemyRanks.includes(state.enemy?.rank)) continue;
@@ -237,7 +343,8 @@ export function applyTriggeredEquipmentEffects(state, trigger) {
         effects: effect.effects,
         source: state.player,
         target: state.enemy,
-        damageSource: DamageSource.EQUIPMENT,
+        damageSource: DamageSource.EXTRA,
+        healAmountResolver,
       });
       state.player = result.source;
       state.enemy = result.target;

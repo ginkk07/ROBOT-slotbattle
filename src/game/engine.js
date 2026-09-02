@@ -7,13 +7,16 @@ import {
 import { getEvent } from './data/events.js';
 import { EffectType } from './data/effect-types.js';
 import { ItemEffectTrigger, ItemEffectType } from './data/item-effects.js';
-import { getItem } from './data/items.js';
+import { ITEMS, getItem } from './data/items.js';
+import { PLAYER_PROGRESSION_RULES } from './data/player-progression.js';
+import { ContentRarity } from './data/rarities.js';
 import { getRegion } from './data/regions.js';
 import {
   PassiveSkillTrigger,
   SkillActivation,
 } from './data/skill-effects.js';
 import {
+  SKILLS,
   getSkill,
   getSkillLevelDefinition,
   skillActivation,
@@ -33,21 +36,28 @@ import {
 import { applyEffects, damageAfterMitigation } from './engines/effects.js';
 import { drawEncounter } from './engines/encounter-engine.js';
 import {
-  afterEnemyAttackEquipmentDamageRequests,
   afterSpinEquipmentBonuses,
   applyTriggeredEquipmentEffects,
+  consumeStatusRemovalEquipment,
+  ensureMinimumSymbols,
   equipItem,
   equippedItemIds,
   equipmentActionLimitBonus,
   equipmentEffectEntries,
   equipmentSymbolChances,
+  extraDamageAmount,
+  firstSpinDamageHealingRequests,
+  healingAmount,
   healingResourceBonus,
   minimumEliteEncounterChance,
   normalizeEquipmentIds,
+  progressiveSpinExtraDamageRequests,
   promotesSymbolsWithLucky,
+  reduceDamageBySource,
   reduceIncomingDamageWithEquipment,
   resourceGainAmount,
   spinDamageModifiers,
+  treatsSymbolAsLucky,
   turnResourceRetentionRatio,
 } from './engines/equipment-engine.js';
 import { resolveEvent } from './engines/event-engine.js';
@@ -59,6 +69,7 @@ import {
   forgetSkill,
   normalizePlayerSkills,
   playerSkillLevel,
+  skillMaximum,
 } from './engines/skill-progression.js';
 import {
   advanceStatusDurations,
@@ -70,7 +81,7 @@ import {
   resolveAfterEnemyAttackStatuses,
   symbolChancesWithStatuses,
 } from './engines/status-engine.js';
-import { randomInteger } from './engines/weighted-random.js';
+import { pickWeighted, randomInteger } from './engines/weighted-random.js';
 import { drawReels, resolveSymbolChances } from './random.js';
 import { scoreSpin } from './scoring.js';
 import { SYMBOL_META, SymbolId } from './symbols.js';
@@ -203,38 +214,17 @@ export function placeBet(
       resolveSymbolChances(fixedSymbolChances),
     )
     : fixedSymbolChances;
-  const spinReels = reels ?? drawReels(rng, symbolChances);
+  const drawnReels = reels ?? drawReels(rng, symbolChances);
+  const spinReels = ensureMinimumSymbols(next.player, drawnReels, { rng: chanceRng });
   // 「下一次拉霸」效果在抽牌後立即清除，三個💀也不會保留。
   next.combatModifiers.nextSpinSymbolChances = {};
   const outcome = scoreSpin(spinReels, wager, {
     promoteWithLucky: promotesSymbolsWithLucky(next.player),
+    unluckyActsAsLucky: treatsSymbolAsLucky(next.player, SymbolId.UNLUCKY),
   });
   next.resources.action -= wager;
   next.lastSpin = outcome;
   next.history.push({ type: 'spin', round: next.round, outcome });
-
-  if (outcome.stunned) {
-    next.stunned = true;
-    next.resources.action = 0;
-    next.resources.armor = 0;
-    next.resources.mana = 0;
-    next.player.activeStatuses = mergeActiveStatus(
-      next.player.activeStatuses,
-      {
-        statusId: 'stunned',
-        sourceUnitId: null,
-        remainingTurns: 1,
-        stacks: 1,
-        potency: 1,
-      },
-    );
-    next.lastImpact = emptyImpact();
-    next.lastAction = {
-      type: 'stunned',
-      text: '三個不幸：本回合暈眩，只能按「回合結束」。',
-    };
-    return next;
-  }
 
   const hasAttackReward = outcome.awarded.attack > 0;
   const statusBonuses = hasAttackReward
@@ -253,27 +243,59 @@ export function placeBet(
     wager,
     chanceRng,
   });
-  const attackEquipmentBonus = hasAttackReward ? damageModifiers.bonusDamage : 0;
-  const requestedAttack = Math.floor((
-    (
-      outcome.awarded.attack
-      + statusBonuses.attackPower
-      + statusBonuses.additionalDamage
-      + attackEquipmentBonus
-    ) * multiplierResult.multiplier
-    + afterSpin.bonusDamage
-  ) * damageModifiers.multiplier);
+  const requestedAttack = hasAttackReward
+    ? Math.floor(
+      (outcome.awarded.attack + statusBonuses.attackPower)
+      * multiplierResult.multiplier
+      * damageModifiers.multiplier,
+    )
+    : 0;
   const attackEvent = dealDamageToEnemy(
     next,
     requestedAttack,
     'physical',
     DamageSource.SPIN,
+    { deferFollowUps: true },
   );
   const spinDamage = attackEvent?.amount ?? 0;
+
+  // 額外傷害逐筆獨立結算，不進入強擊或賭徒左手倍率。
+  const extraDamageEvents = [];
+  if (spinDamage > 0 && statusBonuses.additionalDamage > 0) {
+    const damageEvent = dealDamageToEnemy(
+      next,
+      statusBonuses.additionalDamage,
+      'fire',
+      DamageSource.EXTRA,
+      { deferFollowUps: true },
+    );
+    if (damageEvent) extraDamageEvents.push({ ...damageEvent, statusId: 'fire-imbue' });
+  }
+  for (const request of progressiveSpinExtraDamageRequests(next)) {
+    const damageEvent = dealDamageToEnemy(
+      next,
+      request.amount,
+      request.element,
+      DamageSource.EXTRA,
+      { deferFollowUps: true },
+    );
+    if (damageEvent) extraDamageEvents.push({ ...damageEvent, itemId: request.itemId });
+  }
+  for (const event of afterSpin.events.filter((entry) => entry.type === 'bonus-damage')) {
+    const damageEvent = dealDamageToEnemy(
+      next,
+      event.amount,
+      event.element ?? 'arcane',
+      DamageSource.EXTRA,
+      { deferFollowUps: true },
+    );
+    if (damageEvent) extraDamageEvents.push({ ...damageEvent, itemId: event.itemId });
+  }
 
   const flameSword = resolveAfterSpinDamageEquipment(next, {
     spinDamage,
     rng: chanceRng,
+    deferFollowUps: true,
   });
 
   const armorGained = resourceGainAmount(
@@ -308,7 +330,8 @@ export function placeBet(
       next,
       request.amount,
       request.element,
-      DamageSource.SKILL,
+      DamageSource.EXTRA,
+      { deferFollowUps: true },
     );
     if (!damageEvent) continue;
     resourceStatusDamage += damageEvent.amount;
@@ -320,25 +343,104 @@ export function placeBet(
     });
   }
 
-  const skillDamage = flameSword.damage + resourceStatusDamage;
-  const attackDamage = spinDamage + skillDamage;
+  const primaryDamageEvents = [
+    attackEvent,
+    ...extraDamageEvents,
+    ...flameSword.events.filter((event) => event.type === 'damage'),
+    ...resourceStatusEvents.filter((event) => event.type === 'damage'),
+  ].filter(Boolean);
+  const followUpDamageEvents = settleDamageFollowUps(next, primaryDamageEvents);
+
+  const postSpinEquipmentEvents = resolveAfterSpinStateEquipment(next, outcome, {
+    rng: chanceRng,
+  });
+  const spinHealingEvents = [];
+  if (spinDamage > 0 && next.player.hp > 0) {
+    for (const request of firstSpinDamageHealingRequests(next)) {
+      spinHealingEvents.push(...healPlayer(next, request.amount, {
+        itemId: request.itemId,
+      }));
+    }
+  }
+
+  const stunEvents = [];
+  if (outcome.stunned) {
+    const prevented = consumeStatusRemovalEquipment(next, 'stunned');
+    if (prevented) {
+      stunEvents.push(prevented);
+    } else {
+      next.stunned = true;
+      next.player.activeStatuses = mergeActiveStatus(
+        next.player.activeStatuses,
+        {
+          statusId: 'stunned',
+          sourceUnitId: null,
+          remainingTurns: 1,
+          stacks: 1,
+          potency: 1,
+        },
+      );
+      stunEvents.push({ type: 'apply-status', statusId: 'stunned', applied: true });
+    }
+  }
+
+  const curseDamage = followUpDamageEvents
+    .filter((event) => (
+      event.damageSource === DamageSource.CURSE && event.target === 'enemy'
+    ))
+    .reduce((sum, event) => sum + event.amount, 0);
+  const reflectionDamage = followUpDamageEvents
+    .filter((event) => (
+      event.damageSource === DamageSource.REFLECT && event.target === 'self'
+    ))
+    .reduce((sum, event) => sum + event.amount, 0);
+  const additionalDamage = extraDamageEvents.reduce((sum, event) => sum + event.amount, 0)
+    + flameSword.damage
+    + resourceStatusDamage;
+  const attackDamage = spinDamage + additionalDamage + curseDamage;
   next.lastImpact = {
     attackDamage,
     spinDamage,
-    skillDamage,
+    additionalDamage,
+    curseDamage,
+    reflectionDamage,
+    // 舊面板與舊存檔仍讀取 skillDamage；新版內容請使用 additionalDamage。
+    skillDamage: additionalDamage,
     armorGained,
     manaGained,
-    equipmentBonus: attackEquipmentBonus + afterSpin.bonusDamage + flameSword.damage,
+    equipmentBonus: extraDamageEvents
+      .filter((event) => event.itemId)
+      .reduce((sum, event) => sum + event.amount, 0) + flameSword.damage,
     statusBonus: statusBonuses.attackPower + statusBonuses.additionalDamage,
     damageMultiplier: multiplierResult.multiplier * damageModifiers.multiplier,
   };
-  next.lastAction = { type: 'spin', text: spinActionText(next.lastImpact) };
+  next.lastAction = {
+    type: outcome.stunned && next.stunned ? 'stunned' : 'spin',
+    text: [
+      spinActionText(next.lastImpact),
+      outcome.stunned && next.stunned ? '本回合暈眩，只能按「回合結束」' : null,
+      outcome.stunned && !next.stunned ? '電擊裝置已解除暈眩' : null,
+    ].filter(Boolean).join('、'),
+  };
   next.history.at(-1).equipmentEvents = [
     ...afterSpin.events,
+    ...extraDamageEvents.filter((event) => event.itemId),
     ...flameSword.events,
+    ...postSpinEquipmentEvents,
+    ...spinHealingEvents,
+    ...stunEvents.filter((event) => event.itemId),
   ];
-  next.history.at(-1).statusEvents = resourceStatusEvents;
+  next.history.at(-1).statusEvents = [
+    ...resourceStatusEvents,
+    ...extraDamageEvents.filter((event) => event.statusId),
+    ...followUpDamageEvents,
+    ...stunEvents.filter((event) => !event.itemId),
+  ];
 
+  if (next.player.hp === 0) {
+    finishRun(next, GameStatus.LOST, next.enemy.name);
+    return next;
+  }
   if (next.enemy.hp === 0) awaitCombatVictoryConfirmation(next);
   return next;
 }
@@ -353,6 +455,9 @@ export function activateSkill(
 
   if (!next.player.skillIds.includes(skillId)) {
     throw new Error('這個技能不在目前持有的技能中');
+  }
+  if (next.combatModifiers.sealedSkillIds?.includes(skillId)) {
+    throw new Error(`${getSkill(skillId).name}在本場戰鬥遭到封印`);
   }
 
   const skill = getSkill(skillId);
@@ -379,7 +484,7 @@ export function activateSkill(
 
   const events = applyPlayerEffects(next, {
     effects: levelDefinition.effects,
-    damageSource: DamageSource.SKILL,
+    damageSource: DamageSource.EXTRA,
     rng,
   });
   next.resources.mana -= cost;
@@ -397,7 +502,8 @@ export function activateSkill(
     events,
   });
 
-  if (next.enemy.hp === 0) awaitCombatVictoryConfirmation(next);
+  if (next.player.hp === 0) finishRun(next, GameStatus.LOST, next.enemy.name);
+  else if (next.enemy.hp === 0) awaitCombatVictoryConfirmation(next);
   return next;
 }
 
@@ -424,7 +530,7 @@ export function useItem(
 
   const events = applyPlayerEffects(next, {
     effects: item.effects,
-    damageSource: DamageSource.ITEM,
+    damageSource: DamageSource.EXTRA,
     rng,
   });
   events.push(...applyCombatItemEffects(next, item));
@@ -445,7 +551,8 @@ export function useItem(
     events,
   });
 
-  if (next.enemy.hp === 0) awaitCombatVictoryConfirmation(next);
+  if (next.player.hp === 0) finishRun(next, GameStatus.LOST, next.enemy.name);
+  else if (next.enemy.hp === 0) awaitCombatVictoryConfirmation(next);
   return next;
 }
 
@@ -475,7 +582,8 @@ export function endPlayerTurn(
   const wasStunned = isStunned(next);
   const discardedAction = next.resources.action;
   const playerTurnEndStatus = resolveTriggeredStatuses(
-    next.player,
+    next,
+    'player',
     StatusTrigger.TURN_END,
   );
   next.player = advanceStatusDurations(playerTurnEndStatus.unit);
@@ -500,7 +608,8 @@ export function endPlayerTurn(
   }
 
   const enemyTurnStartStatus = resolveTriggeredStatuses(
-    next.enemy,
+    next,
+    'enemy',
     StatusTrigger.TURN_START,
   );
   next.enemy = enemyTurnStartStatus.unit;
@@ -511,7 +620,7 @@ export function endPlayerTurn(
 
   const resolvedRound = next.round;
   const intent = next.enemy.intent ?? selectMonsterIntent(next.enemy, { rng: monsterRng });
-  const armorUsed = wasStunned ? 0 : Math.min(next.resources.armor, intent.damage);
+  const armorUsed = Math.min(next.resources.armor, intent.damage);
   next.resources.armor = Math.max(0, next.resources.armor - armorUsed);
   const incomingAfterArmor = Math.max(0, intent.damage - armorUsed);
   const reducedIncomingDamage = reduceIncomingDamageWithEquipment(
@@ -525,6 +634,7 @@ export function endPlayerTurn(
     {
       damage: reducedIncomingDamage,
       resources: next.resources,
+      sealedSkillIds: next.combatModifiers.sealedSkillIds,
     },
   );
   next.resources = passiveSkillResolution.context.resources;
@@ -541,51 +651,43 @@ export function endPlayerTurn(
     passiveSkillResolution.context.damage,
   );
   next.player.hp -= damageTaken;
+  const enemyAttackDamageEvent = {
+    type: 'damage',
+    element: 'physical',
+    requested: intent.damage,
+    amount: damageTaken,
+    damageSource: DamageSource.EXTRA,
+    target: 'self',
+    armorUsed,
+    passiveDamageBlocked,
+  };
+  const enemyAttackFollowUpEvents = resolveDamageFollowUps(next, {
+    attacker: 'enemy',
+    target: 'player',
+    requested: intent.damage,
+    amount: damageTaken,
+    damageSource: DamageSource.EXTRA,
+  });
 
   let monsterEffectEvents = [];
-  if (next.player.hp > 0 && intent.effects.length > 0) {
-    const result = applyEffects({
-      effects: intent.effects,
-      source: next.enemy,
-      target: next.player,
-      damageSource: DamageSource.SKILL,
+  if (next.player.hp > 0 && next.enemy.hp > 0 && intent.effects.length > 0) {
+    monsterEffectEvents = applyMonsterEffects(next, intent.effects, {
       rng: monsterRng,
     });
-    next.enemy = result.source;
-    next.player = result.target;
-    monsterEffectEvents = result.events;
   }
 
-  const reactiveStatusResult = resolveAfterEnemyAttackStatuses(
-    next.player,
-    next.enemy,
-    { rng: monsterRng },
-  );
+  const reactiveStatusResult = next.player.hp > 0 && next.enemy.hp > 0
+    ? resolveAfterEnemyAttackStatuses(
+      next.player,
+      next.enemy,
+      { rng: monsterRng },
+    )
+    : { holder: next.player, attacker: next.enemy, events: [] };
   next.player = reactiveStatusResult.holder;
   next.enemy = reactiveStatusResult.attacker;
 
-  const afterEnemyAttackEquipmentEvents = [];
-  for (const request of afterEnemyAttackEquipmentDamageRequests(
-    next.player,
-    { armor: armorUsed },
-  )) {
-    const damageEvent = dealDamageToEnemy(
-      next,
-      request.amount,
-      request.element,
-      DamageSource.EQUIPMENT,
-    );
-    if (!damageEvent) continue;
-    afterEnemyAttackEquipmentEvents.push({
-      ...damageEvent,
-      itemId: request.itemId,
-      resource: request.resource,
-      resourceSpent: request.spent,
-    });
-  }
-
   const enemyTurnEndStatus = next.enemy.hp > 0
-    ? resolveTriggeredStatuses(next.enemy, StatusTrigger.TURN_END)
+    ? resolveTriggeredStatuses(next, 'enemy', StatusTrigger.TURN_END)
     : { unit: next.enemy, events: [] };
   next.enemy = advanceStatusDurations(enemyTurnEndStatus.unit);
   const discardedResources = clearTurnResources(next, {
@@ -609,9 +711,12 @@ export function endPlayerTurn(
     next.phase = GamePhase.PLAYER_TURN;
     next.combatModifiers.damageDealtThisTurn = 0;
     next.combatModifiers.damageDealtBySource = createDamageSourceTotals();
+    next.combatModifiers.progressiveSpinExtraDamage = {};
+    next.combatModifiers.usedTurnEquipmentEffects = {};
     next.resources.action = playerActionLimit(next);
     playerTurnStartStatus = resolveTriggeredStatuses(
-      next.player,
+      next,
+      'player',
       StatusTrigger.TURN_START,
     );
     next.player = playerTurnStartStatus.unit;
@@ -644,9 +749,12 @@ export function endPlayerTurn(
     manaArmorBlocked: passiveDamageBlocked,
     manaSpent: passiveManaSpent,
     damageTaken,
+    enemyAttackDamageEvent,
     monsterEffectEvents,
     afterEnemyAttackStatusEvents: reactiveStatusResult.events,
-    afterEnemyAttackEquipmentEvents,
+    damageFollowUpEvents: enemyAttackFollowUpEvents,
+    // 舊欄位保留給現有面板；新版反射事件改收錄在 damageFollowUpEvents。
+    afterEnemyAttackEquipmentEvents: [],
     enemyStatusEvents: [
       ...enemyTurnStartStatus.events,
       ...enemyTurnEndStatus.events,
@@ -659,7 +767,7 @@ export function endPlayerTurn(
     playerEquipmentEvents: [
       ...turnEndHealingEvents,
       ...playerTurnEndEquipmentEvents,
-      ...afterEnemyAttackEquipmentEvents,
+      ...enemyAttackFollowUpEvents,
       ...turnStartHealingEvents,
       ...playerTurnStartEquipmentEvents,
     ],
@@ -745,28 +853,130 @@ export function chooseEventOption(
 
   if (outcome.type === 'full-heal') {
     next.player.hp = next.player.maxHp;
-  } else if (outcome.type === 'forget-random-skill') {
-    const skillId = randomSkillId(next.player, eventRng);
+  } else if (outcome.type === 'seal-random-skill') {
+    const skillId = randomPendingSkillSealId(next.player, eventRng);
     if (skillId) {
-      next.player = forgetSkill(next.player, skillId);
-      next.event.forgottenSkillId = skillId;
+      next.player.pendingSealedSkillIds = [...new Set([
+        ...(next.player.pendingSealedSkillIds ?? []),
+        skillId,
+      ])];
+      next.event.sealedSkillId = skillId;
     }
+  } else if (outcome.type === 'full-heal-start-combat') {
+    next.player.hp = next.player.maxHp;
+    startEventCombat(next, outcome, { rng: eventRng, monsterRng });
+    return next;
   } else if (outcome.type === 'start-combat') {
     startEventCombat(next, outcome, { rng: eventRng, monsterRng });
+    return next;
+  } else if (outcome.type === 'blood-unseal') {
+    resolveBloodUnseal(next, outcome, eventRng);
+    return next;
+  } else if (outcome.type === 'reduce-max-hp-upgrade-skill') {
+    beginAncientEchoUpgrade(next, outcome);
+    return next;
+  } else if (outcome.type === 'collector-challenge') {
+    beginCollectorChallenge(next, outcome, eventRng);
     return next;
   } else if (outcome.type !== 'continue') {
     throw new RangeError(`尚未支援的事件結果：${outcome.type}`);
   }
 
-  const forgottenName = next.event.forgottenSkillId
-    ? `\n你遺忘了「${getSkill(next.event.forgottenSkillId).name}」。`
+  const sealedName = next.event.sealedSkillId
+    ? `\n你的「${getSkill(next.event.sealedSkillId).name}」在下一場戰鬥中遭到封印。`
     : '';
-  next.event.stage = 'result';
-  next.event.result = {
-    outcomeId: outcome.id,
-    type: outcome.type,
-    text: `${outcome.text}${forgottenName}`,
-  };
+  setEventResult(next, outcome, `${outcome.text}${sealedName}`);
+  return next;
+}
+
+/**
+ * 處理奇遇中的技能選擇。遠古回響、收藏家下注與技能替換共用此入口，
+ * 由 event.stage 決定選擇的用途，避免 Discord 按鈕直接改寫存檔。
+ */
+export function chooseEventSkill(
+  state,
+  skillId,
+  { eventRng = Math.random } = {},
+) {
+  const next = upgradeGameState(state);
+  assertEventStage(next, [
+    'skill-upgrade-choice',
+    'collector-wager-choice',
+    'collector-replace-choice',
+  ]);
+  if (!next.event.skillChoices?.includes(skillId)) {
+    throw new RangeError('這個技能不在目前的奇遇選項中');
+  }
+
+  if (next.event.stage === 'skill-upgrade-choice') {
+    const granted = grantSkillReward(next.player, skillId);
+    Object.assign(next.player, granted.player);
+    const skill = getSkill(skillId);
+    const outcome = next.event.pendingOutcome;
+    next.history.push({
+      type: 'event-skill-upgraded',
+      eventId: next.event.eventId,
+      skillId,
+      targetLevel: granted.targetLevel,
+    });
+    setEventResult(
+      next,
+      outcome,
+      `${outcome.text}\n你的最大生命降低 ${next.event.maxHpReduced} 點。遠古的知識湧入腦海，「${skill.name}」提升至 Lv.${granted.targetLevel}。`,
+    );
+    return next;
+  }
+
+  if (next.event.stage === 'collector-replace-choice') {
+    const collector = next.event.collector;
+    const oldSkill = getSkill(skillId);
+    const rewardSkill = getSkill(collector.rewardId);
+    next.player = forgetSkill(next.player, skillId);
+    const granted = grantSkillReward(next.player, collector.rewardId);
+    Object.assign(next.player, granted.player);
+    next.history.push({
+      type: 'event-collector-skill-replaced',
+      eventId: next.event.eventId,
+      oldSkillId: skillId,
+      newSkillId: collector.rewardId,
+    });
+    setEventResult(next, {
+      id: 'collector-skill-win',
+      type: 'collector-challenge',
+    }, `三枚符文同時亮起。你捨棄了「${oldSkill.name}」，掌握傳說技能「${rewardSkill.name}」。`);
+    return next;
+  }
+
+  next.event.collector.wagerSkillId = skillId;
+  next.history.push({
+    type: 'event-collector-wager-selected',
+    eventId: next.event.eventId,
+    skillId,
+    rewardType: next.event.collector.rewardType,
+    rewardId: next.event.collector.rewardId,
+  });
+  resolveCollectorSpin(next, null, eventRng);
+  return next;
+}
+
+/** 進行收藏家的下一次轉動；lockIndex為null時重新轉動全部三格。 */
+export function spinCollectorEvent(
+  state,
+  lockIndex,
+  { eventRng = Math.random } = {},
+) {
+  const next = upgradeGameState(state);
+  assertEventStage(next, ['collector-spin']);
+  const normalizedLock = lockIndex === null || lockIndex === 'none'
+    ? null
+    : Number(lockIndex);
+  if (
+    normalizedLock !== null
+    && (!Number.isInteger(normalizedLock) || normalizedLock < 0 || normalizedLock > 2)
+  ) {
+    throw new RangeError('收藏家鎖定位置必須是第1～3格');
+  }
+  resolveCollectorSpin(next, normalizedLock, eventRng);
   return next;
 }
 
@@ -790,6 +1000,9 @@ export function completeEvent(
     });
     if (next.phase !== GamePhase.EVENT) return next;
   }
+  if (next.event.stage !== 'result') {
+    throw new Error('這個奇遇仍有尚未完成的選擇');
+  }
 
   next.history.push({
     type: 'event-completed',
@@ -800,6 +1013,262 @@ export function completeEvent(
   next.adventure.completedEncounters += 1;
   startNextNode(next, { worldRng, monsterRng });
   return next;
+}
+
+function resolveBloodUnseal(state, outcome, rng) {
+  const item = drawEventEquipmentReward(state, {
+    rarity: outcome.rewardRarity,
+    rng,
+  });
+  if (!item) {
+    setEventResult(
+      state,
+      outcome,
+      `${outcome.text}\n石臺上已沒有你能取得的新裝備，封印也沒有奪走你的生命。`,
+    );
+    return;
+  }
+
+  const requestedDamage = Math.max(
+    1,
+    Math.floor(state.player.maxHp * Number(outcome.damageMaxHpRatio ?? 0)),
+  );
+  const damage = Math.min(requestedDamage, Math.max(0, state.player.hp - 1));
+  state.player.hp -= damage;
+  applyReward(state.player, {
+    contentType: 'item',
+    contentId: item.id,
+    acquisition: 'acquire',
+    rarity: item.rarity,
+  });
+  state.history.push({
+    type: 'event-blood-unsealed',
+    eventId: state.event.eventId,
+    damage,
+    itemId: item.id,
+  });
+  setEventResult(
+    state,
+    outcome,
+    `${outcome.text}\n你失去 ${damage} 點生命，取得稀有裝備「${item.name}」。`,
+  );
+}
+
+function beginAncientEchoUpgrade(state, outcome) {
+  const previousMaxHp = state.player.maxHp;
+  state.player.maxHp = Math.max(
+    1,
+    Math.floor(previousMaxHp * Number(outcome.maxHpRatio ?? 1)),
+  );
+  state.player.hp = Math.min(state.player.hp, state.player.maxHp);
+  state.event.maxHpReduced = previousMaxHp - state.player.maxHp;
+  state.event.pendingOutcome = structuredClone(outcome);
+  state.event.skillChoices = (state.player.skillIds ?? []).filter((skillId) => (
+    playerSkillLevel(state.player, skillId) < skillMaximum(skillId)
+  ));
+
+  if (state.event.skillChoices.length === 0) {
+    setEventResult(
+      state,
+      outcome,
+      `${outcome.text}\n你的最大生命降低 ${state.event.maxHpReduced} 點，但目前沒有尚未滿級的技能。`,
+    );
+    return;
+  }
+
+  state.event.stage = 'skill-upgrade-choice';
+  state.event.prompt = `${outcome.text}\n你的最大生命降低 ${state.event.maxHpReduced} 點。請選擇一項尚未滿級的技能。`;
+}
+
+function beginCollectorChallenge(state, outcome, rng) {
+  const reward = drawCollectorReward(state, outcome.rewardType, rng);
+  if (!reward || (state.player.skillIds?.length ?? 0) === 0) {
+    const reason = !reward
+      ? '收藏家沒有能提供給你的新傳說獎勵。'
+      : '你目前沒有可作為賭注的技能。';
+    setEventResult(state, outcome, `${outcome.text}\n${reason}`);
+    return;
+  }
+
+  state.event.collector = {
+    rewardType: outcome.rewardType,
+    rewardId: reward.id,
+    wagerSkillId: null,
+    attempt: 0,
+    reels: [],
+  };
+  state.event.pendingOutcome = structuredClone(outcome);
+  state.event.skillChoices = [...state.player.skillIds];
+  state.event.stage = 'collector-wager-choice';
+  state.event.prompt = [
+    `收藏家向你展示了${outcome.rewardType === 'skill' ? '傳說技能' : '傳說裝備'}「${reward.name}」。`,
+    '請選擇一項現有技能作為賭注。挑戰成功會保留賭注；失敗則永久失去該技能。',
+  ].join('\n');
+}
+
+function resolveCollectorSpin(state, lockIndex, rng) {
+  const collector = state.event.collector;
+  if (!collector?.wagerSkillId) throw new Error('收藏家尚未收到賭注技能');
+  if (collector.attempt >= 4) throw new Error('收藏家的轉動次數已用完');
+
+  const probabilities = resolveSymbolChances(equipmentSymbolChances(state.player));
+  const previous = collector.reels ?? [];
+  collector.reels = [0, 1, 2].map((index) => (
+    lockIndex !== null && previous.length === 3 && index === lockIndex
+      ? previous[index]
+      : drawEventSymbol(probabilities, rng)
+  ));
+  collector.attempt += 1;
+  state.history.push({
+    type: 'event-collector-spin',
+    eventId: state.event.eventId,
+    attempt: collector.attempt,
+    lockIndex,
+    reels: [...collector.reels],
+  });
+
+  if (collectorSpinWins(collector.reels)) {
+    finishCollectorWin(state);
+    return;
+  }
+  if (collector.attempt >= 4) {
+    const wagerSkill = getSkill(collector.wagerSkillId);
+    state.player = forgetSkill(state.player, collector.wagerSkillId);
+    state.history.push({
+      type: 'event-collector-lost',
+      eventId: state.event.eventId,
+      skillId: collector.wagerSkillId,
+    });
+    setEventResult(state, {
+      id: 'collector-wager-lost',
+      type: 'collector-challenge',
+    }, `第四次轉動緩緩停下，符文依然無法排列一致。你永久失去了作為賭注的「${wagerSkill.name}」。`);
+    return;
+  }
+
+  state.event.stage = 'collector-spin';
+  state.event.prompt = `第 ${collector.attempt}／4 次轉動未成功。下一次可以重新轉動全部符文，或鎖定其中1格。`;
+}
+
+function finishCollectorWin(state) {
+  const collector = state.event.collector;
+  const wagerSkill = getSkill(collector.wagerSkillId);
+  if (collector.rewardType === 'equipment') {
+    const item = getItem(collector.rewardId);
+    applyReward(state.player, {
+      contentType: 'item',
+      contentId: item.id,
+      acquisition: 'acquire',
+      rarity: item.rarity,
+    });
+    state.history.push({
+      type: 'event-collector-won',
+      eventId: state.event.eventId,
+      rewardType: collector.rewardType,
+      rewardId: item.id,
+      wagerSkillId: collector.wagerSkillId,
+    });
+    setEventResult(state, {
+      id: 'collector-item-win',
+      type: 'collector-challenge',
+    }, `三枚符文同時亮起。你取得傳說裝備「${item.name}」，作為賭注的「${wagerSkill.name}」也回到了你的手中。`);
+    return;
+  }
+
+  const rewardSkill = getSkill(collector.rewardId);
+  if ((state.player.skillIds?.length ?? 0) < PLAYER_PROGRESSION_RULES.maxHeldSkills) {
+    const granted = grantSkillReward(state.player, rewardSkill.id);
+    Object.assign(state.player, granted.player);
+    state.history.push({
+      type: 'event-collector-won',
+      eventId: state.event.eventId,
+      rewardType: collector.rewardType,
+      rewardId: rewardSkill.id,
+      wagerSkillId: collector.wagerSkillId,
+    });
+    setEventResult(state, {
+      id: 'collector-skill-win',
+      type: 'collector-challenge',
+    }, `三枚符文同時亮起。你掌握傳說技能「${rewardSkill.name}」，作為賭注的「${wagerSkill.name}」也回到了你的手中。`);
+    return;
+  }
+
+  state.event.stage = 'collector-replace-choice';
+  state.event.skillChoices = [...state.player.skillIds];
+  state.event.prompt = `三枚符文同時亮起，你贏得傳說技能「${rewardSkill.name}」。技能欄已滿，請選擇一項現有技能進行替換。`;
+}
+
+function drawEventEquipmentReward(state, { rarity, rng }) {
+  const regionTags = getRegion(state.adventure.regionId).tags;
+  const owned = new Set(equippedItemIds(state.player));
+  const candidates = Object.values(ITEMS).filter((item) => (
+    item.type === 'equipment'
+    && item.rarity === rarity
+    && item.lootEligible
+    && regionTags.every((tag) => item.lootTags?.includes(tag))
+    && !owned.has(item.id)
+  ));
+  return candidates.length > 0
+    ? pickWeighted(candidates, rng, (item) => item.lootWeight)
+    : null;
+}
+
+function drawCollectorReward(state, rewardType, rng) {
+  const regionTags = getRegion(state.adventure.regionId).tags;
+  if (rewardType === 'skill') {
+    const owned = new Set(state.player.skillIds ?? []);
+    const candidates = Object.values(SKILLS).filter((skill) => (
+      skill.rarity === ContentRarity.LEGENDARY
+      && skill.lootEligible
+      && regionTags.every((tag) => skill.lootTags?.includes(tag))
+      && !owned.has(skill.id)
+    ));
+    return candidates.length > 0
+      ? pickWeighted(candidates, rng, (skill) => skill.lootWeight)
+      : null;
+  }
+  if (rewardType === 'equipment') {
+    return drawEventEquipmentReward(state, {
+      rarity: ContentRarity.LEGENDARY,
+      rng,
+    });
+  }
+  throw new RangeError(`收藏家獎勵類型不合法：${rewardType}`);
+}
+
+function drawEventSymbol(probabilities, rng) {
+  const entries = Object.entries(probabilities).map(([symbolId, weight]) => ({
+    symbolId,
+    weight,
+  }));
+  return pickWeighted(entries, rng).symbolId;
+}
+
+function collectorSpinWins(reels) {
+  if (reels.includes(SymbolId.UNLUCKY)) return false;
+  const fixedSymbols = reels.filter((symbolId) => symbolId !== SymbolId.LUCKY);
+  return new Set(fixedSymbols).size <= 1;
+}
+
+function setEventResult(state, outcome, text) {
+  state.event.stage = 'result';
+  state.event.prompt = null;
+  state.event.skillChoices = [];
+  state.event.pendingOutcome = null;
+  state.event.result = {
+    outcomeId: outcome.id,
+    type: outcome.type,
+    text,
+  };
+}
+
+function assertEventStage(state, stages) {
+  if (state.status !== GameStatus.ACTIVE || state.phase !== GamePhase.EVENT) {
+    throw new Error('目前沒有可處理的奇遇');
+  }
+  if (!stages.includes(state.event?.stage)) {
+    throw new Error('目前不能進行這項奇遇選擇');
+  }
 }
 
 // 保留舊名稱，讓外部模擬與尚未更新的呼叫端不會直接中斷。
@@ -898,6 +1367,7 @@ function startNextNode(state, {
   state.enemy.intent = selectMonsterIntent(state.enemy, { rng: monsterRng });
   state.round = 1;
   state.resources.action = playerActionLimit(state);
+  activatePendingSkillSeals(state);
   applyBattleStartEquipmentEffects(state);
   applyPlayerTurnStartEquipmentEffects(state);
   state.history.push({
@@ -933,6 +1403,7 @@ function startEventCombat(state, outcome, { rng, monsterRng }) {
   clearCombatPresentation(state);
   state.player.activeStatuses = [];
   state.stunned = false;
+  activatePendingSkillSeals(state);
   applyBattleStartEquipmentEffects(state);
   applyPlayerTurnStartEquipmentEffects(state);
   state.lastAction = { type: 'event', text: outcome.text };
@@ -944,14 +1415,38 @@ function startEventCombat(state, outcome, { rng, monsterRng }) {
   });
 }
 
-function randomSkillId(player, rng) {
-  const skillIds = player.skillIds ?? [];
+function randomPendingSkillSealId(player, rng) {
+  const alreadyPending = new Set(player.pendingSealedSkillIds ?? []);
+  const available = (player.skillIds ?? []).filter((skillId) => (
+    !alreadyPending.has(skillId)
+  ));
+  const skillIds = available.length > 0 ? available : (player.skillIds ?? []);
   if (skillIds.length === 0) return null;
   return skillIds[randomInteger(0, skillIds.length - 1, rng)];
 }
 
+function activatePendingSkillSeals(state) {
+  state.combatModifiers.sealedSkillIds = [...new Set(
+    state.player.pendingSealedSkillIds ?? [],
+  )];
+  state.player.pendingSealedSkillIds = [];
+}
+
 function awaitCombatVictoryConfirmation(state) {
   if (state.phase !== GamePhase.PLAYER_TURN) return;
+  const battleEndEvents = applyTriggeredEquipmentEffects(
+    state,
+    ItemEffectTrigger.BATTLE_END,
+    { healAmountResolver: (amount) => healingAmount(state.player, amount) },
+  );
+  const battleEndHealingEvents = applyHealingEquipmentBonus(state, battleEndEvents);
+  if (battleEndEvents.length > 0 || battleEndHealingEvents.length > 0) {
+    state.history.push({
+      type: 'equipment-battle-end',
+      round: state.round,
+      events: [...battleEndEvents, ...battleEndHealingEvents],
+    });
+  }
   state.phase = GamePhase.VICTORY_CONFIRM;
   state.enemy.intent = null;
   clearTurnResources(state);
@@ -1017,6 +1512,7 @@ function finishRun(state, status, defeatedBy) {
   state.pendingRegionAdvance = false;
   clearTurnResources(state);
   state.player.activeStatuses = [];
+  state.player.pendingSealedSkillIds = [];
   state.player.inventory = [];
   state.player.equipment = [];
   state.player.skillIds = [];
@@ -1101,6 +1597,7 @@ function applyBattleStartEquipmentEffects(state) {
   const events = applyTriggeredEquipmentEffects(
     state,
     ItemEffectTrigger.BATTLE_START,
+    { healAmountResolver: (amount) => healingAmount(state.player, amount) },
   );
   if (events.length === 0) return;
   state.history.push({
@@ -1114,6 +1611,7 @@ function applyPlayerTurnStartEquipmentEffects(state) {
   const events = applyTriggeredEquipmentEffects(
     state,
     ItemEffectTrigger.PLAYER_TURN_START,
+    { healAmountResolver: (amount) => healingAmount(state.player, amount) },
   );
   return [...events, ...applyHealingEquipmentBonus(state, events)];
 }
@@ -1127,28 +1625,118 @@ function applyPlayerEffects(
   { effects = [], damageSource = null, rng } = {},
 ) {
   if (effects.length === 0) return [];
-  const result = applyEffects({
-    effects,
-    source: state.player,
-    target: state.enemy,
-    resources: state.resources,
-    resourceGainResolver: (resource, amount) => resourceGainAmount(
-      state.player,
-      resource,
-      amount,
-    ),
-    resourceMaximums: { action: playerActionLimit(state) },
-    damageSource,
-    rng,
-  });
-  state.player = result.source;
-  state.enemy = result.target;
-  state.resources = result.resources;
-  recordDamageEvents(state, result.events);
-  return [
-    ...result.events,
-    ...applyHealingEquipmentBonus(state, result.events),
-  ];
+  const events = [];
+  for (const effect of effects) {
+    if (effect.target === 'enemy' && state.enemy?.hp <= 0) continue;
+
+    if (effect.type === EffectType.DAMAGE) {
+      const baseAmount = Number(effect.amount ?? effect.amountPerPoint ?? 0);
+      const damageEvent = effect.target === 'self'
+        ? applyDirectDamage(
+          state,
+          'player',
+          extraDamageAmount(state.player, baseAmount),
+          effect.element,
+          damageSource,
+        )
+        : dealDamageToEnemy(state, baseAmount, effect.element, damageSource);
+      if (damageEvent) {
+        events.push(damageEvent, ...(damageEvent.followUpEvents ?? []));
+      }
+      continue;
+    }
+
+    if (effect.type === EffectType.DAMAGE_FROM_RESOURCE) {
+      const current = Number(state.resources[effect.resource] ?? 0);
+      const minimum = Number(effect.minimumResource ?? 0);
+      if (current < minimum) {
+        throw new RangeError(`${effect.resource}至少需要 ${minimum} 點`);
+      }
+      const baseAmount = Math.floor(current * Number(effect.multiplier ?? 1));
+      const remaining = Math.floor(current * (1 - Number(effect.consumeRatio ?? 0)));
+      const resourceSpent = current - remaining;
+      state.resources[effect.resource] = remaining;
+      const damageEvent = dealDamageToEnemy(
+        state,
+        baseAmount,
+        effect.element,
+        damageSource,
+      );
+      if (damageEvent) {
+        Object.assign(damageEvent, {
+          resource: effect.resource,
+          resourceSpent,
+          resourceRemaining: remaining,
+        });
+        events.push(damageEvent, ...(damageEvent.followUpEvents ?? []));
+      }
+      continue;
+    }
+
+    const result = applyEffects({
+      effects: [effect],
+      source: state.player,
+      target: state.enemy,
+      resources: state.resources,
+      resourceGainResolver: (resource, amount) => resourceGainAmount(
+        state.player,
+        resource,
+        amount,
+      ),
+      resourceMaximums: { action: playerActionLimit(state) },
+      damageSource,
+      healAmountResolver: (amount) => healingAmount(state.player, amount),
+      rng,
+    });
+    state.player = result.source;
+    state.enemy = result.target;
+    state.resources = result.resources;
+    events.push(...result.events);
+    events.push(...applyHealingEquipmentBonus(state, result.events));
+  }
+  return events;
+}
+
+function applyMonsterEffects(state, effects, { rng = Math.random } = {}) {
+  const events = [];
+  for (const effect of effects) {
+    if (state.player.hp <= 0 || state.enemy.hp <= 0) break;
+    if (effect.type === EffectType.DAMAGE) {
+      const requested = Number(effect.amount ?? effect.amountPerPoint ?? 0);
+      const targetKey = effect.target === 'self' ? 'enemy' : 'player';
+      const attackerKey = targetKey === 'player' ? 'enemy' : 'player';
+      const damageEvent = applyDirectDamage(
+        state,
+        targetKey,
+        requested,
+        effect.element,
+        DamageSource.EXTRA,
+      );
+      if (damageEvent) {
+        const followUpEvents = resolveDamageFollowUps(state, {
+          attacker: attackerKey,
+          target: targetKey,
+          requested,
+          amount: damageEvent.amount,
+          damageSource: DamageSource.EXTRA,
+        });
+        events.push(damageEvent, ...followUpEvents);
+      }
+      continue;
+    }
+
+    const result = applyEffects({
+      effects: [effect],
+      source: state.enemy,
+      target: state.player,
+      damageSource: DamageSource.EXTRA,
+      rng,
+    });
+    state.enemy = result.source;
+    state.player = result.target;
+    events.push(...result.events);
+  }
+  return events;
 }
 
 function applyHealingEquipmentBonus(state, events) {
@@ -1219,21 +1807,157 @@ function applyCombatItemEffects(state, item) {
   return events;
 }
 
-function dealDamageToEnemy(state, amount, element, damageSource) {
+function dealDamageToEnemy(
+  state,
+  amount,
+  element,
+  damageSource,
+  { deferFollowUps = false } = {},
+) {
   if (!Number.isFinite(amount) || amount <= 0 || state.enemy?.hp <= 0) return null;
-  const result = applyEffects({
-    effects: [{ type: 'damage', element, amount, target: 'enemy' }],
-    source: state.player,
-    target: state.enemy,
+  const requested = damageSource === DamageSource.EXTRA
+    ? extraDamageAmount(state.player, amount)
+    : amount;
+  const event = applyDirectDamage(state, 'enemy', requested, element, damageSource);
+  if (!event || event.amount <= 0) return event;
+  if (deferFollowUps) {
+    event.followUpEvents = [];
+    return event;
+  }
+
+  const followUpEvents = resolveDamageFollowUps(state, {
+    attacker: 'player',
+    target: 'enemy',
+    requested,
+    amount: event.amount,
     damageSource,
   });
-  state.player = result.source;
-  state.enemy = result.target;
-  recordDamageEvents(state, result.events);
-  return result.events[0];
+  event.followUpEvents = followUpEvents;
+  event.curseDamage = followUpEvents
+    .filter((entry) => entry.damageSource === DamageSource.CURSE && entry.target === 'enemy')
+    .reduce((sum, entry) => sum + entry.amount, 0);
+  event.reflectionDamage = followUpEvents
+    .filter((entry) => entry.damageSource === DamageSource.REFLECT && entry.target === 'self')
+    .reduce((sum, entry) => sum + entry.amount, 0);
+  return event;
 }
 
-function resolveAfterSpinDamageEquipment(state, { spinDamage, rng }) {
+/**
+ * 直接扣除指定單位 HP。詛咒無視一般抗性與減傷；其餘類別仍走元素減免。
+ * 玩家護甲／魔力護甲只在敵人主要攻擊入口處理，不會在此重複消耗。
+ */
+function applyDirectDamage(state, targetKey, requested, element, damageSource) {
+  const unit = state[targetKey];
+  if (!unit || unit.hp <= 0 || requested <= 0) return null;
+  const resolved = damageSource === DamageSource.CURSE
+    ? { amount: requested, resistance: 0, damageReduction: 0 }
+    : damageAfterMitigation(requested, unit, element);
+  const amount = Math.min(unit.hp, resolved.amount);
+  unit.hp -= amount;
+  const event = {
+    type: 'damage',
+    element,
+    requested,
+    resistance: resolved.resistance,
+    damageReduction: resolved.damageReduction,
+    damageSource,
+    amount,
+    target: targetKey === 'enemy' ? 'enemy' : 'self',
+  };
+  recordDamageEvents(state, [event]);
+  return event;
+}
+
+/**
+ * 每筆有效的拉霸／額外傷害完成後，先結算詛咒，再結算反射。
+ * 詛咒與反射兩類傷害都不會再觸發任何一種連鎖。
+ */
+function resolveDamageFollowUps(
+  state,
+  hit,
+  { resolveCurse = true, resolveReflection = true } = {},
+) {
+  if (
+    hit.amount <= 0
+    || hit.damageSource === DamageSource.CURSE
+    || hit.damageSource === DamageSource.REFLECT
+  ) return [];
+
+  const events = [];
+  const damagedUnit = state[hit.target];
+  const curseStacks = activeStatusValue(damagedUnit, 'curse');
+  if (resolveCurse && curseStacks > 0) {
+    for (const targetKey of ['player', 'enemy']) {
+      const targetStacks = activeStatusValue(state[targetKey], 'curse');
+      if (targetStacks <= 0) continue;
+      let requested = Math.min(hit.requested, targetStacks);
+      if (targetKey === 'player') {
+        requested = reduceDamageBySource(
+          state.player,
+          DamageSource.CURSE,
+          requested,
+        );
+      }
+      const event = applyDirectDamage(
+        state,
+        targetKey,
+        requested,
+        'curse',
+        DamageSource.CURSE,
+      );
+      if (event) events.push(event);
+    }
+  }
+
+  const reflection = activeStatusValue(damagedUnit, 'damage-reflection');
+  if (resolveReflection && reflection > 0) {
+    const attackerKey = hit.attacker;
+    const event = applyDirectDamage(
+      state,
+      attackerKey,
+      reflection,
+      'physical',
+      DamageSource.REFLECT,
+    );
+    if (event) events.push(event);
+  }
+  return events;
+}
+
+/** 單次拉霸先完成全部拉霸／額外傷害，再統一結算詛咒，最後才反射。 */
+function settleDamageFollowUps(state, damageEvents) {
+  const hits = damageEvents
+    .filter((event) => event.amount > 0)
+    .map((event) => ({
+      attacker: 'player',
+      target: 'enemy',
+      requested: event.requested,
+      amount: event.amount,
+      damageSource: event.damageSource,
+    }));
+  const curseEvents = hits.flatMap((hit) => resolveDamageFollowUps(state, hit, {
+    resolveCurse: true,
+    resolveReflection: false,
+  }));
+  const reflectionEvents = hits.flatMap((hit) => resolveDamageFollowUps(state, hit, {
+    resolveCurse: false,
+    resolveReflection: true,
+  }));
+  return [...curseEvents, ...reflectionEvents];
+}
+
+function activeStatusValue(unit, statusId) {
+  return (unit?.activeStatuses ?? [])
+    .filter((active) => active.statusId === statusId)
+    .reduce((total, active) => total + (
+      Number(active.stacks ?? 1) * Number(active.potency ?? 1)
+    ), 0);
+}
+
+function resolveAfterSpinDamageEquipment(
+  state,
+  { spinDamage, rng, deferFollowUps = false },
+) {
   if (spinDamage <= 0 || state.enemy?.hp <= 0) return { damage: 0, events: [] };
   let damage = 0;
   const events = [];
@@ -1262,12 +1986,13 @@ function resolveAfterSpinDamageEquipment(state, { spinDamage, rng }) {
 
     const stacks = state.enemy.activeStatuses
       ?.find((status) => status.statusId === effect.statusId)?.stacks ?? 0;
-    // 燃焰之劍由拉霸傷害觸發，但追加的燃燒層數傷害屬於技能傷害。
+    // 燃焰之劍由拉霸傷害觸發，追加的燃燒層數傷害屬於額外傷害。
     const damageEvent = dealDamageToEnemy(
       state,
       stacks,
       effect.element,
-      DamageSource.SKILL,
+      DamageSource.EXTRA,
+      { deferFollowUps },
     );
     if (damageEvent) {
       damage += damageEvent.amount;
@@ -1278,8 +2003,89 @@ function resolveAfterSpinDamageEquipment(state, { spinDamage, rng }) {
   return { damage, events };
 }
 
+/** 拉霸所有傷害結算後才處理黑貓尾巴與巫毒人偶。 */
+function resolveAfterSpinStateEquipment(state, outcome, { rng = Math.random } = {}) {
+  const events = [];
+  for (const { itemId, effect } of equipmentEffectEntries(
+    state.player,
+    ItemEffectTrigger.AFTER_SPIN,
+  )) {
+    if (effect.requiresSymbolId && !outcome.reels.includes(effect.requiresSymbolId)) continue;
+
+    if (effect.type === ItemEffectType.INCREASE_MAX_HP) {
+      state.player.maxHp += Number(effect.amount ?? 0);
+      events.push({
+        type: 'increase-max-hp',
+        itemId,
+        amount: Number(effect.amount ?? 0),
+        maxHp: state.player.maxHp,
+      });
+      continue;
+    }
+
+    if (effect.type === ItemEffectType.APPLY_STATUS_PER_SYMBOL) {
+      const symbolCount = Number(outcome.counts[effect.symbolId] ?? 0);
+      const stacks = symbolCount * Number(effect.stacksPerSymbol ?? 1);
+      if (stacks <= 0) continue;
+      for (const target of effect.targets ?? []) {
+        const result = applyEffects({
+          effects: [{
+            type: EffectType.APPLY_STATUS,
+            statusId: effect.statusId,
+            target,
+            chance: 1,
+            stacks,
+            potency: 1,
+          }],
+          source: state.player,
+          target: state.enemy,
+          rng,
+        });
+        state.player = result.source;
+        state.enemy = result.target;
+        events.push(...result.events.map((event) => ({ ...event, itemId })));
+      }
+    }
+  }
+  return events;
+}
+
+function healPlayer(state, baseAmount, metadata = {}) {
+  const requested = healingAmount(state.player, baseAmount);
+  const amount = Math.min(state.player.maxHp - state.player.hp, requested);
+  state.player.hp += amount;
+  const event = {
+    type: 'heal',
+    baseRequested: baseAmount,
+    requested,
+    amount,
+    target: 'self',
+    ...metadata,
+  };
+  return [event, ...applyHealingEquipmentBonus(state, [event])];
+}
+
 function resolvePlayerTurnEndEquipment(state) {
   const events = [];
+
+  for (const { itemId, effect } of equipmentEffectEntries(
+    state.player,
+    ItemEffectTrigger.PLAYER_TURN_END,
+    ItemEffectType.ENSURE_MINIMUM_RESOURCE,
+  )) {
+    const before = Number(state.resources[effect.resource] ?? 0);
+    const minimum = Number(effect.minimum ?? 0);
+    if (before >= minimum) continue;
+    const amount = resourceGainAmount(state.player, effect.resource, minimum - before);
+    if (amount <= 0) continue;
+    state.resources[effect.resource] = before + amount;
+    events.push({
+      type: 'gain-resource',
+      itemId,
+      resource: effect.resource,
+      amount,
+    });
+  }
 
   // 回合末傷害必須先結算。這能讓後面的夏賜儀碇把星海羅盤傷害
   // 一併視為「本回合有造成傷害」，並清除先前累積的額外上限。
@@ -1293,7 +2099,7 @@ function resolvePlayerTurnEndEquipment(state) {
       state,
       amount,
       effect.element,
-      DamageSource.EQUIPMENT,
+      DamageSource.EXTRA,
     );
     if (damageEvent) events.push({ ...damageEvent, itemId });
   }
@@ -1357,9 +2163,13 @@ function createCombatModifiers() {
     actionLimitBonus: 0,
     // 只計玩家在目前回合實際對敵人造成的傷害。
     damageDealtThisTurn: 0,
-    // 保留相同總傷害，另外依來源分組，讓限定拉霸／技能傷害的效果
-    // 不需要回頭猜測是哪一條流程產生傷害。
+    // 依四大傷害分類記錄本回合實際傷害。
     damageDealtBySource: createDamageSourceTotals(),
+    progressiveSpinExtraDamage: {},
+    usedTurnEquipmentEffects: {},
+    usedOnceEquipmentEffects: {},
+    // 神秘泉水等奇遇可封印下一場戰鬥的技能；戰鬥結束後隨重置清除。
+    sealedSkillIds: [],
     // 磨刀石等「下一次拉霸」消耗品暫存在此，抽牌後立刻清空。
     nextSpinSymbolChances: {},
   };
@@ -1377,8 +2187,9 @@ function itemActionCost(item) {
   return actionCost;
 }
 
-function resolveTriggeredStatuses(unit, trigger) {
-  const next = structuredClone(unit);
+function resolveTriggeredStatuses(state, targetKey, trigger) {
+  state[targetKey] = structuredClone(state[targetKey]);
+  const next = state[targetKey];
   const events = [];
   for (const active of next.activeStatuses ?? []) {
     const definition = getStatus(active.statusId);
@@ -1388,43 +2199,64 @@ function resolveTriggeredStatuses(unit, trigger) {
       * Number(active.stacks ?? 1);
 
     if (definition.effect.type === StatusEffectType.DAMAGE) {
-      const mitigation = damageAfterMitigation(
-        requested,
-        next,
-        definition.effect.element,
-      );
-      const amount = Math.min(
-        next.hp,
-        mitigation.amount,
-      );
-      next.hp -= amount;
-      events.push({
-        type: 'damage',
-        damageSource: DamageSource.STATUS,
-        statusId: active.statusId,
-        amount,
-        resistance: mitigation.resistance,
-        damageReduction: mitigation.damageReduction,
-        element: definition.effect.element,
-      });
+      const damageEvent = targetKey === 'enemy'
+        ? dealDamageToEnemy(
+          state,
+          requested,
+          definition.effect.element,
+          DamageSource.EXTRA,
+        )
+        : applyDirectDamage(
+          state,
+          'player',
+          requested,
+          definition.effect.element,
+          DamageSource.EXTRA,
+        );
+      if (damageEvent) {
+        const followUpEvents = targetKey === 'player'
+          ? resolveDamageFollowUps(state, {
+            attacker: 'enemy',
+            target: 'player',
+            requested,
+            amount: damageEvent.amount,
+            damageSource: DamageSource.EXTRA,
+          })
+          : (damageEvent.followUpEvents ?? []);
+        events.push(
+          { ...damageEvent, statusId: active.statusId },
+          ...followUpEvents,
+        );
+      }
     }
 
     if (definition.effect.type === StatusEffectType.HEAL) {
-      const amount = Math.min(next.maxHp - next.hp, requested);
+      const resolved = targetKey === 'player'
+        ? healingAmount(state.player, requested)
+        : requested;
+      const amount = Math.min(next.maxHp - next.hp, resolved);
       next.hp += amount;
-      events.push({ type: 'heal', statusId: active.statusId, amount });
+      events.push({
+        type: 'heal',
+        statusId: active.statusId,
+        baseRequested: requested,
+        requested: resolved,
+        amount,
+      });
     }
 
     if (definition.stacking.mode === 'stack-countdown') {
-      active.stacks = Math.max(0, Number(active.stacks ?? 1) - 1);
+      active.stacks = Math.floor(Number(active.stacks ?? 1) / 2);
       active.remainingTurns = active.stacks;
-      const latestEvent = events.at(-1);
+      const latestEvent = [...events].reverse().find((event) => (
+        event.type === 'damage' && event.statusId === active.statusId
+      ));
       if (latestEvent) latestEvent.remainingStacks = active.stacks;
     }
   }
   next.activeStatuses = (next.activeStatuses ?? [])
     .filter((status) => Number(status.stacks ?? 1) > 0);
-  return { unit: next, events };
+  return { unit: state[targetKey], events };
 }
 
 function wouldOnlyHealFullHealth(source, player) {
@@ -1511,6 +2343,9 @@ function emptyImpact() {
   return {
     attackDamage: 0,
     spinDamage: 0,
+    additionalDamage: 0,
+    curseDamage: 0,
+    reflectionDamage: 0,
     skillDamage: 0,
     armorGained: 0,
     manaGained: 0,
@@ -1561,6 +2396,7 @@ function applyEnemyOverrides(enemy, overrides) {
 function ensureCurrentFields(state) {
   state.player = normalizePlayerSkills(state.player);
   state.player.activeStatuses ??= [];
+  state.player.pendingSealedSkillIds ??= [];
   state.player.inventory ??= [];
   state.player.equipment = normalizeEquipmentIds(state.player.equipment);
   state.combatModifiers = {
@@ -1577,7 +2413,10 @@ function ensureCurrentFields(state) {
   state.rewardChoices ??= [];
   if (state.lastImpact) {
     state.lastImpact.spinDamage ??= state.lastImpact.attackDamage ?? 0;
-    state.lastImpact.skillDamage ??= 0;
+    state.lastImpact.additionalDamage ??= state.lastImpact.skillDamage ?? 0;
+    state.lastImpact.curseDamage ??= 0;
+    state.lastImpact.reflectionDamage ??= 0;
+    state.lastImpact.skillDamage ??= state.lastImpact.additionalDamage;
   }
   state.endSummary ??= null;
   state.stunned = isStunned(state);

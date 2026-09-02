@@ -238,26 +238,8 @@ function renderRewardChoice(state) {
 }
 
 function renderEvent(state) {
-  const resultStage = state.event.stage === 'result';
-  const eventText = resultStage ? state.event.result.text : state.event.description;
+  const eventText = eventDisplayText(state.event);
   const progress = `地區 ${state.adventure.regionDepth}｜本區完成 ${state.adventure.regionProgress} 次遭遇`;
-  const components = resultStage
-    ? [actionRow([
-      button({
-        customId: gameCustomId(state.id, 'event-continue'),
-        label: '繼續冒險',
-        style: BUTTON_STYLE.PRIMARY,
-      }),
-      abandonButton(state.id),
-    ])]
-    : [
-      actionRow(state.event.options.map((option) => button({
-        customId: gameCustomId(state.id, 'event-option', option.id),
-        label: option.label,
-        style: BUTTON_STYLE.PRIMARY,
-      }))),
-      actionRow([abandonButton(state.id)]),
-    ];
   return {
     embeds: [{
       color: COLORS.event,
@@ -268,8 +250,85 @@ function renderEvent(state) {
         `【奇遇】${eventText}`,
       ].join('\n'),
     }],
-    components,
+    components: eventControls(state),
   };
+}
+
+function eventDisplayText(event) {
+  if (event.stage === 'result') return event.result.text;
+  if (event.stage === 'collector-spin') {
+    return [
+      event.prompt,
+      '',
+      `魔導轉輪匣｜${formatReels(event.collector.reels)}`,
+    ].join('\n');
+  }
+  return event.prompt ?? event.description;
+}
+
+function eventControls(state) {
+  const { event } = state;
+  if (event.stage === 'result') {
+    return [actionRow([
+      button({
+        customId: gameCustomId(state.id, 'event-continue'),
+        label: '繼續冒險',
+        style: BUTTON_STYLE.PRIMARY,
+      }),
+      abandonButton(state.id),
+    ])];
+  }
+
+  if (event.stage === 'choice') {
+    return [
+      actionRow(event.options.map((option) => button({
+        customId: gameCustomId(state.id, 'event-option', option.id),
+        label: option.label,
+        style: BUTTON_STYLE.PRIMARY,
+      }))),
+      actionRow([abandonButton(state.id)]),
+    ];
+  }
+
+  if ([
+    'skill-upgrade-choice',
+    'collector-wager-choice',
+    'collector-replace-choice',
+  ].includes(event.stage)) {
+    const prefix = {
+      'skill-upgrade-choice': '強化',
+      'collector-wager-choice': '賭上',
+      'collector-replace-choice': '替換',
+    }[event.stage];
+    return [
+      actionRow(event.skillChoices.map((skillId) => button({
+        customId: gameCustomId(state.id, 'event-skill', skillId),
+        label: `${prefix} ${getSkill(skillId).name}`,
+        style: BUTTON_STYLE.PRIMARY,
+      }))),
+      actionRow([abandonButton(state.id)]),
+    ];
+  }
+
+  if (event.stage === 'collector-spin') {
+    return [
+      actionRow([
+        button({
+          customId: gameCustomId(state.id, 'event-collector-spin', 'none'),
+          label: '全部重新轉動',
+          style: BUTTON_STYLE.PRIMARY,
+        }),
+        ...event.collector.reels.map((symbolId, index) => button({
+          customId: gameCustomId(state.id, 'event-collector-spin', String(index)),
+          label: `鎖定第${index + 1}格 ${SYMBOL_META[symbolId].emoji}`,
+          style: BUTTON_STYLE.SECONDARY,
+        })),
+      ]),
+      actionRow([abandonButton(state.id)]),
+    ];
+  }
+
+  throw new RangeError(`尚未支援的奇遇階段：${event.stage}`);
 }
 
 function renderEndSummary(state) {
@@ -355,10 +414,13 @@ function combatControls(state) {
   }
 
   const equipmentIds = Object.values(state.player.equipment ?? {});
-  const maximumActionRows = equipmentIds.length > 0 ? 3 : 4;
+  const equipmentPages = chunk(equipmentIds, 25);
+  const maximumActionRows = Math.max(0, 4 - equipmentPages.length);
   const rows = chunk(actionButtons, 5).slice(0, maximumActionRows).map(actionRow);
-  if (equipmentIds.length > 0) {
-    rows.push(actionRow([equipmentSelect(state, equipmentIds)]));
+  for (const [pageIndex, pageIds] of equipmentPages.entries()) {
+    rows.push(actionRow([
+      equipmentSelect(state, pageIds, pageIndex, equipmentIds.length, equipmentPages.length),
+    ]));
   }
   rows.push(actionRow([
     button({
@@ -372,14 +434,19 @@ function combatControls(state) {
   return rows;
 }
 
-function equipmentSelect(state, equipmentIds) {
+function equipmentSelect(state, equipmentIds, pageIndex, totalCount, pageCount) {
+  const firstNumber = pageIndex * 25 + 1;
+  const lastNumber = firstNumber + equipmentIds.length - 1;
+  const action = pageCount === 1 ? 'detail-equipment' : `detail-equipment-${pageIndex + 1}`;
   return {
     type: COMPONENT_TYPE.STRING_SELECT,
-    custom_id: gameCustomId(state.id, 'detail-equipment'),
-    placeholder: `查看裝備（${equipmentIds.length}）`,
+    custom_id: gameCustomId(state.id, action),
+    placeholder: pageCount === 1
+      ? `查看裝備（${totalCount}）`
+      : `查看裝備（${firstNumber}–${lastNumber}／${totalCount}）`,
     min_values: 1,
     max_values: 1,
-    options: equipmentIds.slice(0, 25).map((itemId) => {
+    options: equipmentIds.map((itemId) => {
       const item = getItem(itemId);
       return {
         label: item.name,
@@ -462,14 +529,14 @@ function lastSpinText(state) {
     `　${formatReels(state.lastSpin.reels)}`,
     '╚═══════════╝',
   ].join('\n');
-  if (state.lastSpin.stunned) {
-    return `${reels}\n拉霸結果：進入暈眩狀態`;
-  }
   const impact = state.lastImpact ?? {};
   const results = [];
   if (impact.attackDamage > 0) results.push(`造成 ${impact.attackDamage} 傷害`);
   if (impact.armorGained > 0) results.push(`護甲 +${impact.armorGained}`);
   if (impact.manaGained > 0) results.push(`法力 +${impact.manaGained}`);
+  if (state.lastSpin.stunned) {
+    results.push(isStunned(state) ? '進入暈眩狀態' : '電擊裝置解除暈眩');
+  }
   return `${reels}\n拉霸結果：${results.join('／') || '沒有產生效果'}`;
 }
 
@@ -478,7 +545,10 @@ function statusListText(statuses) {
   return statuses.map((status) => {
     const definition = getStatus(status.statusId);
     if (definition.durationMode === 'battle') {
-      return `${definition.emoji}${definition.name}`;
+      const stackText = Number(status.stacks ?? 1) > 1
+        ? `（${status.stacks}層）`
+        : '';
+      return `${definition.emoji}${definition.name}${stackText}`;
     }
     if (definition.durationMode === 'until-consumed') {
       if (definition.effect.type === 'multiply-spin-damage') {

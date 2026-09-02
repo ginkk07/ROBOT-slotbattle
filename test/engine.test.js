@@ -5,6 +5,7 @@ import { DamageSource } from '../src/game/data/damage-sources.js';
 import {
   abandonGame,
   activateSkill,
+  chooseEventSkill,
   chooseEventOption,
   chooseReward,
   completeEvent,
@@ -15,11 +16,13 @@ import {
   GameStatus,
   isStunned,
   placeBet,
+  spinCollectorEvent,
   upgradeGameState,
   useItem,
 } from '../src/game/engine.js';
 import { SymbolId } from '../src/game/symbols.js';
 import { getEvent } from '../src/game/data/events.js';
+import { getItem } from '../src/game/data/items.js';
 
 const { ATTACK, DEFENSE, SKILL, UNLUCKY } = SymbolId;
 const zero = () => 0;
@@ -44,14 +47,18 @@ function game({
 }
 
 function springEventState(skillIds = ['power-strike']) {
+  return eventState('ruins-mysterious-spring', skillIds);
+}
+
+function eventState(eventId, skillIds = ['power-strike']) {
   const state = createGame({
-    id: 'spring-event',
+    id: `${eventId}-test`,
     ownerId: 'player-1',
     config: { initialEnemyUnitId: 'ruins-sentinel' },
     loadout: { skillIds, itemIds: [] },
     monsterRng: zero,
   });
-  const event = getEvent('ruins-mysterious-spring');
+  const event = getEvent(eventId);
   state.phase = GamePhase.EVENT;
   state.enemy = null;
   state.event = {
@@ -83,6 +90,9 @@ test('每次拉霸會立即攻擊並累積本回合護甲與法力', () => {
   assert.deepEqual(state.lastImpact, {
     attackDamage: 6,
     spinDamage: 6,
+    additionalDamage: 0,
+    curseDamage: 0,
+    reflectionDamage: 0,
     skillDamage: 0,
     armorGained: 2,
     manaGained: 0,
@@ -301,7 +311,7 @@ test('劍在每場戰鬥開始時取得攻擊力狀態並持續3回合', () => {
   );
 });
 
-test('火焰炸彈附加3層燃燒並在回合開始造成層數傷害後減少1層', () => {
+test('火焰炸彈附加3層燃燒，傷害後燃燒層數除以2並在低於1時解除', () => {
   let state = createGame({
     id: 'bomb-test',
     ownerId: 'player-1',
@@ -319,24 +329,21 @@ test('火焰炸彈附加3層燃燒並在回合開始造成層數傷害後減少1
   state = useItem(state, 'fire-bomb', { rng: zero });
   assert.equal(state.enemy.hp, 92);
   assert.equal(state.enemy.activeStatuses[0].stacks, 3);
-  assert.equal(state.history.at(-1).events[0].damageSource, DamageSource.ITEM);
+  assert.equal(state.history.at(-1).events[0].damageSource, DamageSource.EXTRA);
 
   state = endPlayerTurn(state, { monsterRng: zero });
   assert.equal(state.enemy.hp, 89);
-  assert.equal(state.enemy.activeStatuses[0].stacks, 2);
+  assert.equal(state.enemy.activeStatuses[0].stacks, 1);
   assert.equal(
     state.lastResolution.enemyStatusEvents[0].damageSource,
-    DamageSource.STATUS,
+    DamageSource.EXTRA,
   );
   state = endPlayerTurn(state, { monsterRng: zero });
-  assert.equal(state.enemy.hp, 87);
-  assert.equal(state.enemy.activeStatuses[0].stacks, 1);
-  state = endPlayerTurn(state, { monsterRng: zero });
-  assert.equal(state.enemy.hp, 86);
+  assert.equal(state.enemy.hp, 88);
   assert.equal(state.enemy.activeStatuses.length, 0);
 });
 
-test('火焰衝擊立即造成5點傷害並以60%機率附加3層燃燒', () => {
+test('火焰衝擊立即造成5點額外傷害並以60%機率附加5層燃燒', () => {
   let state = createGame({
     id: 'flame-impact-test',
     ownerId: 'player-1',
@@ -355,14 +362,14 @@ test('火焰衝擊立即造成5點傷害並以60%機率附加3層燃燒', () => 
   state = activateSkill(state, 'flame-impact', { rng: () => 0.59 });
 
   assert.equal(state.enemy.hp, 95);
-  assert.equal(state.enemy.activeStatuses[0].stacks, 3);
+  assert.equal(state.enemy.activeStatuses[0].stacks, 5);
   assert.equal(state.resources.mana, 6);
-  assert.equal(state.history.at(-1).events[0].damageSource, DamageSource.SKILL);
-  assert.equal(state.combatModifiers.damageDealtBySource.skill, 5);
+  assert.equal(state.history.at(-1).events[0].damageSource, DamageSource.EXTRA);
+  assert.equal(state.combatModifiers.damageDealtBySource.extra, 5);
 });
 
-test('火焰衝擊會依等級附加3、4、5層燃燒', () => {
-  for (const [level, expectedStacks] of [[1, 3], [2, 4], [3, 5]]) {
+test('火焰衝擊會依等級附加5、10、15層燃燒', () => {
+  for (const [level, expectedStacks] of [[1, 5], [2, 10], [3, 15]]) {
     let state = createGame({
       id: `flame-impact-level-${level}`,
       ownerId: 'player-1',
@@ -394,12 +401,12 @@ test('三個不幸不會自動換回合，玩家只能手動結束', () => {
   assert.equal(state.enemy.hp, 57);
   assert.equal(state.player.hp, 45);
   assert.equal(isStunned(state), true);
-  assert.deepEqual(state.resources, { action: 0, armor: 0, mana: 0 });
+  assert.deepEqual(state.resources, { action: 2, armor: 1, mana: 0 });
   assert.throws(() => placeBet(state, 1), /暈眩/);
 
   state = endPlayerTurn(state, { monsterRng: zero });
   assert.equal(state.round, 2);
-  assert.equal(state.player.hp, 30);
+  assert.equal(state.player.hp, 31);
   assert.equal(isStunned(state), false);
 });
 
@@ -486,7 +493,7 @@ test('完成奇遇會增加地區進度並繼續下一次遭遇', () => {
   state.adventure.completedEncounters = 1;
 
   state = completeEvent(state, {
-    worldRng: sequence([0.99, 0.99, 0, 0, 0]),
+    worldRng: sequence([0, 0.99, 0.99, 0, 0]),
     monsterRng: zero,
   });
   assert.equal(state.adventure.regionProgress, 2);
@@ -502,23 +509,32 @@ test('神秘泉水選擇喝水後有50%機率回滿HP並顯示結果', () => {
   assert.equal(state.player.hp, state.player.maxHp);
   assert.equal(state.phase, GamePhase.EVENT);
   assert.equal(state.event.stage, 'result');
-  assert.match(state.event.result.text, /HP 回滿/);
+  assert.match(state.event.result.text, /傷口逐漸癒合/);
 });
 
-test('神秘泉水有20%機率隨機遺忘一個技能', () => {
+test('神秘泉水有20%機率封印下一場戰鬥的一個技能', () => {
   let state = springEventState(['power-strike', 'life-recovery']);
   state.player.skillLevels['power-strike'] = 2;
   state = chooseEventOption(state, 'drink', {
     eventRng: sequence([0.5, 0]),
   });
 
-  assert.deepEqual(state.player.skillIds, ['life-recovery']);
-  assert.equal(state.player.skillLevels['power-strike'], undefined);
-  assert.match(state.event.result.text, /遺忘了「強擊」/);
+  assert.deepEqual(state.player.skillIds, ['power-strike', 'life-recovery']);
+  assert.deepEqual(state.player.pendingSealedSkillIds, ['power-strike']);
+  assert.match(state.event.result.text, /「強擊」在下一場戰鬥中遭到封印/);
+
+  state = completeEvent(state, {
+    worldRng: sequence([0.99, 0.99, 0, 0]),
+    monsterRng: zero,
+  });
+  assert.deepEqual(state.player.pendingSealedSkillIds, []);
+  assert.deepEqual(state.combatModifiers.sealedSkillIds, ['power-strike']);
+  assert.throws(() => activateSkill(state, 'power-strike'), /遭到封印/);
 });
 
-test('神秘泉水有20%機率進入菁英戰鬥，整個奇遇只計一次進度', () => {
+test('神秘泉水有20%機率回滿生命後進入菁英戰鬥，整個奇遇只計一次進度', () => {
   let state = springEventState();
+  state.player.hp = 5;
   state = chooseEventOption(state, 'drink', {
     eventRng: sequence([0.7, 0, 0]),
     monsterRng: zero,
@@ -526,8 +542,9 @@ test('神秘泉水有20%機率進入菁英戰鬥，整個奇遇只計一次進�
 
   assert.equal(state.phase, GamePhase.PLAYER_TURN);
   assert.equal(state.enemy.rank, 'elite');
+  assert.equal(state.player.hp, state.player.maxHp);
   assert.equal(state.adventure.regionProgress, 0);
-  assert.match(state.lastAction.text, /進入了戰鬥/);
+  assert.match(state.lastAction.text, /強大生物/);
 
   state.enemy.hp = 1;
   state = placeBet(state, 1, {
@@ -538,6 +555,85 @@ test('神秘泉水有20%機率進入菁英戰鬥，整個奇遇只計一次進�
   state = confirmCombatVictory(state, { rewardRng: zero });
   assert.equal(state.adventure.regionProgress, 1);
   assert.equal(state.adventure.completedEncounters, 1);
+});
+
+test('密封石室最多扣除最大生命20%且最低保留1HP，並取得未持有的稀有裝備', () => {
+  let state = eventState('ruins-sealed-vault');
+  state.player.hp = 8;
+  state = chooseEventOption(state, 'blood-unseal', {
+    eventRng: sequence([0, 0]),
+  });
+
+  assert.equal(state.player.hp, 1);
+  assert.equal(state.player.equipment.length, 1);
+  assert.equal(getItem(state.player.equipment[0]).rarity, 'rare');
+  assert.match(state.event.result.text, /失去 7 點生命/);
+});
+
+test('廢棄營地伏擊會直接進入普通戰鬥且不恢復生命', () => {
+  let state = eventState('ruins-abandoned-camp');
+  state.player.hp = 9;
+  state = chooseEventOption(state, 'rest', {
+    eventRng: sequence([0.9, 0, 0]),
+    monsterRng: zero,
+  });
+
+  assert.equal(state.phase, GamePhase.PLAYER_TURN);
+  assert.equal(state.enemy.rank, 'normal');
+  assert.equal(state.player.hp, 9);
+});
+
+test('遠古回響降低20%最大生命並讓玩家選擇一項未滿級技能提升', () => {
+  let state = eventState('ruins-ancient-echo', [
+    'power-strike',
+    'life-recovery',
+  ]);
+  state.player.skillLevels['life-recovery'] = 3;
+  state = chooseEventOption(state, 'accept', { eventRng: zero });
+
+  assert.equal(state.player.maxHp, 36);
+  assert.equal(state.event.stage, 'skill-upgrade-choice');
+  assert.deepEqual(state.event.skillChoices, ['power-strike']);
+
+  state = chooseEventSkill(state, 'power-strike');
+  assert.equal(state.player.skillLevels['power-strike'], 2);
+  assert.equal(state.event.stage, 'result');
+  assert.match(state.event.result.text, /強擊.*Lv\.2/);
+});
+
+test('神秘收藏家轉出三個相同符文時取得傳說裝備並保留賭注技能', () => {
+  let state = eventState('ruins-mysterious-collector');
+  state = chooseEventOption(state, 'challenge-item', {
+    eventRng: sequence([0, 0]),
+  });
+  assert.equal(state.event.stage, 'collector-wager-choice');
+
+  state = chooseEventSkill(state, 'power-strike', {
+    eventRng: sequence([0, 0, 0]),
+  });
+  assert.equal(state.event.stage, 'result');
+  assert.equal(state.player.skillIds.includes('power-strike'), true);
+  assert.equal(state.player.equipment.length, 1);
+  assert.equal(getItem(state.player.equipment[0]).rarity, 'legendary');
+});
+
+test('神秘收藏家可鎖定一格重轉，第四次仍失敗會永久失去賭注技能', () => {
+  let state = eventState('ruins-mysterious-collector');
+  state = chooseEventOption(state, 'challenge-skill', {
+    eventRng: sequence([0, 0]),
+  });
+  state = chooseEventSkill(state, 'power-strike', {
+    eventRng: sequence([0, 0.4, 0.7]),
+  });
+  assert.equal(state.event.stage, 'collector-spin');
+
+  state = spinCollectorEvent(state, 0, { eventRng: sequence([0.4, 0.7]) });
+  state = spinCollectorEvent(state, 0, { eventRng: sequence([0.4, 0.7]) });
+  state = spinCollectorEvent(state, 0, { eventRng: sequence([0.4, 0.7]) });
+
+  assert.equal(state.event.stage, 'result');
+  assert.equal(state.player.skillIds.includes('power-strike'), false);
+  assert.match(state.event.result.text, /永久失去/);
 });
 
 test('戰敗會立即結束遊戲並清除本輪資料，只保留結算快照', () => {

@@ -10,6 +10,7 @@ import { renderContentDetail } from './content-detail.js';
 import {
   abandonGame,
   activateSkill,
+  chooseEventSkill,
   chooseReward,
   chooseEventOption,
   completeEvent,
@@ -19,6 +20,7 @@ import {
   endPlayerTurn,
   isStunned,
   placeBet,
+  spinCollectorEvent,
   upgradeGameState,
   useItem,
 } from '../game/engine.js';
@@ -125,7 +127,7 @@ export function createGameController({
           return handledResult(renderContentDetail(session.state, contentType, value));
         }
 
-        if (action === 'detail-equipment') {
+        if (action.startsWith('detail-equipment')) {
           const itemId = values[0];
           if (!itemId) throw new Error('沒有收到裝備選擇');
           return handledResult(renderContentDetail(session.state, 'item', itemId));
@@ -335,6 +337,16 @@ function nextStateForAction(state, { action, value }, rngs) {
     return chooseEventOption(state, value, {
       eventRng: rngs.eventRng,
       monsterRng: rngs.monsterRng,
+    });
+  }
+  if (action === 'event-skill') {
+    return chooseEventSkill(state, value, {
+      eventRng: rngs.eventRng,
+    });
+  }
+  if (action === 'event-collector-spin') {
+    return spinCollectorEvent(state, value, {
+      eventRng: rngs.eventRng,
     });
   }
   if (action === 'event-continue') {

@@ -28,6 +28,7 @@ export function applyEffects({
   resourceMaximums = {},
   points = 1,
   damageSource = null,
+  healAmountResolver = (amount) => amount,
   rng = Math.random,
 }) {
   if (damageSource !== null && !DAMAGE_SOURCES.includes(damageSource)) {
@@ -50,6 +51,7 @@ export function applyEffects({
       resourceMaximums,
       points,
       damageSource,
+      healAmountResolver,
       rng,
     }));
   }
@@ -59,12 +61,22 @@ export function applyEffects({
   return result;
 }
 
-function applyHealEffect({ effect, source, target, points }) {
+function applyHealEffect({ effect, source, target, points, healAmountResolver }) {
   const recipient = effectRecipient(effect, source, target);
-  const requested = effectAmount(effect, points);
+  const baseRequested = effectAmount(effect, points);
+  const requested = healAmountResolver(baseRequested);
+  if (!Number.isFinite(requested) || requested < 0) {
+    throw new RangeError('治療修正後的數值必須是非負數');
+  }
   const amount = Math.min(recipient.maxHp - recipient.hp, requested);
   recipient.hp += amount;
-  return [{ type: 'heal', requested, amount, target: effect.target }];
+  return [{
+    type: 'heal',
+    baseRequested,
+    requested,
+    amount,
+    target: effect.target,
+  }];
 }
 
 function applyDamageEffect({ effect, source, target, points, damageSource }) {

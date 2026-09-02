@@ -77,7 +77,7 @@ test('烈火罩在敵人完成攻擊後附加燃燒並消失，即使傷害全�
   );
 });
 
-test('盾牌投擲造成該次實際護甲加3、6、9點技能傷害且仍保留護甲', () => {
+test('盾牌投擲造成該次實際護甲加3、6、9點額外傷害且仍保留護甲', () => {
   for (const level of [1, 2, 3]) {
     let state = battle({
       skillIds: ['shield-throw'],
@@ -104,7 +104,7 @@ test('盾牌投擲造成該次實際護甲加3、6、9點技能傷害且仍保�
     assert.equal(
       state.history.at(-1).statusEvents.find((event) => event.type === 'damage')
         ?.damageSource,
-      DamageSource.SKILL,
+      DamageSource.EXTRA,
     );
   }
 });
@@ -119,7 +119,7 @@ test('盾牌猛擊使用施放前護甲計算傷害，再留下向下取整的�
   assert.equal(state.enemy.hp, 485);
   assert.equal(state.resources.armor, 2);
   assert.equal(state.resources.mana, 0);
-  assert.equal(state.history.at(-1).events[0].damageSource, DamageSource.SKILL);
+  assert.equal(state.history.at(-1).events[0].damageSource, DamageSource.EXTRA);
   assert.equal(state.history.at(-1).events[0].resourceSpent, 3);
 });
 
@@ -156,25 +156,22 @@ test('聖盾術Lv3消耗3點法力，持續三個玩家回合並調整25個百�
   );
 });
 
-test('荊棘反射實際消耗護甲，魔石提供法力，金剛石保留剩餘護甲一半', () => {
-  let state = battle({
+test('荊棘在實際受到HP傷害時反射5點，護甲完全擋住時不反射', () => {
+  let blocked = battle({
     itemIds: ['iron-shield', 'thorns', 'magic-stone', 'diamond'],
     baseDamage: 1,
   });
+  blocked = endPlayerTurn(blocked, { monsterRng: zero });
+  assert.equal(blocked.enemy.hp, 500);
+  assert.equal(blocked.lastResolution.damageFollowUpEvents.length, 0);
 
-  assert.equal(state.resources.armor, 5);
-  assert.equal(state.resources.mana, 1);
-
+  let state = battle({ itemIds: ['thorns'], baseDamage: 1 });
   state = endPlayerTurn(state, { monsterRng: zero });
-
-  assert.equal(state.lastResolution.armorUsed, 1);
-  assert.equal(state.lastResolution.retainedArmor, 2);
-  assert.equal(state.resources.armor, 7);
-  assert.equal(state.resources.mana, 1);
-  assert.equal(state.enemy.hp, 499);
+  assert.equal(state.player.hp, 44);
+  assert.equal(state.enemy.hp, 495);
   assert.equal(
-    state.lastResolution.afterEnemyAttackEquipmentEvents[0].damageSource,
-    DamageSource.EQUIPMENT,
+    state.lastResolution.damageFollowUpEvents[0].damageSource,
+    DamageSource.REFLECT,
   );
 });
 

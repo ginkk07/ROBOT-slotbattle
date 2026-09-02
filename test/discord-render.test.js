@@ -19,6 +19,7 @@ import {
   useItem,
 } from '../src/game/engine.js';
 import { getEvent } from '../src/game/data/events.js';
+import { ITEMS } from '../src/game/data/items.js';
 import { SymbolId } from '../src/game/symbols.js';
 import { createDefaultProfile } from '../src/player/profile.js';
 
@@ -121,6 +122,29 @@ test('裝備在面板顯示為已穿戴而不是使用按鈕', () => {
   );
 });
 
+test('超過25件裝備時分頁顯示且不遺漏任何裝備', () => {
+  const state = createGame({
+    id: 'equipment-pages-test',
+    ownerId: 'player-1',
+  });
+  const equipmentIds = Object.values(ITEMS)
+    .filter((item) => item.type === 'equipment')
+    .map((item) => item.id);
+  state.player.equipment = equipmentIds;
+
+  const payload = renderGame(state);
+  const selects = payload.components
+    .flatMap((row) => row.components)
+    .filter((component) => component.custom_id?.includes(':detail-equipment-'));
+
+  assert.ok(payload.components.length <= 5);
+  assert.deepEqual(selects.map((select) => select.options.length), [25, 8]);
+  assert.deepEqual(
+    selects.flatMap((select) => select.options.map((option) => option.value)),
+    equipmentIds,
+  );
+});
+
 test('回合資源只使用符號與數值顯示', () => {
   const payload = renderGame(createGame({
     id: 'resource-render-test',
@@ -189,7 +213,10 @@ test('聖盾術詳情依目前等級顯示5、4、3點法力成本', () => {
 
   const unavailable = renderContentDetail(state, 'skill', 'holy-shield');
   assert.equal(unavailable.embeds[0].fields[1].value, '3');
-  assert.match(unavailable.embeds[0].fields[3].value, /需要 3 點法力/);
+  assert.match(
+    unavailable.embeds[0].fields.find((field) => field.name === '目前狀態').value,
+    /需要 3 點法力/,
+  );
 
   state.resources.mana = 3;
   const usable = renderContentDetail(state, 'skill', 'holy-shield');
@@ -197,6 +224,28 @@ test('聖盾術詳情依目前等級顯示5、4、3點法力成本', () => {
     usable.components[0].components.map((component) => component.label),
     ['使用', '關閉'],
   );
+});
+
+test('技能與道具詳情會顯示相關狀態的完整規則', () => {
+  const skillState = createGame({
+    id: 'status-skill-detail-test',
+    ownerId: 'player-1',
+    loadout: { skillIds: ['flame-impact'], itemIds: [] },
+  });
+  const skillStatus = renderContentDetail(skillState, 'skill', 'flame-impact')
+    .embeds[0].fields.find((field) => field.name === '相關狀態');
+  assert.match(skillStatus.value, /燃燒/);
+  assert.match(skillStatus.value, /層數除以2/);
+
+  const itemState = createGame({
+    id: 'status-item-detail-test',
+    ownerId: 'player-1',
+    loadout: { skillIds: ['power-strike'], itemIds: ['thorns'] },
+  });
+  const itemStatus = renderContentDetail(itemState, 'item', 'thorns')
+    .embeds[0].fields.find((field) => field.name === '相關狀態');
+  assert.match(itemStatus.value, /傷害反射/);
+  assert.match(itemStatus.value, /詛咒與反射傷害不會觸發/);
 });
 
 test('一次性護甲技能狀態不會被誤顯示為拉霸傷害倍率', () => {
@@ -379,13 +428,13 @@ test('奇遇先顯示冒險進度，再顯示不公開名稱的奇遇內文', ()
   assert.equal(embed.title, '冒險進度');
   assert.equal(
     embed.description,
-    '地區 1｜本區完成 0 次遭遇\n\n【奇遇】你遇到一座充滿生命力的泉水，是否要取水喝？',
+    '地區 1｜本區完成 0 次遭遇\n\n【奇遇】你在遺跡深處發現一座清澈的泉水。水面泛著微弱光芒，但你無法判斷這股力量究竟是祝福，還是某種危險的誘惑。',
   );
   assert.equal(embed.fields, undefined);
   assert.equal(embed.footer, undefined);
   assert.doesNotMatch(JSON.stringify(payload), /神秘泉水/);
   assert.doesNotMatch(JSON.stringify(payload), /奇遇名稱不會顯示/);
-  assert.deepEqual(labels, ['是', '否']);
+  assert.deepEqual(labels, ['飲用泉水', '離開泉水']);
 
   state.event.stage = 'result';
   state.event.result = { text: '你覺得身體裡充滿活力，HP 回滿了。' };

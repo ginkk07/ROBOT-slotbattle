@@ -1,4 +1,5 @@
 import { ACHIEVEMENTS } from './achievements.js';
+import { DAMAGE_SOURCES } from './damage-sources.js';
 import { ENCOUNTER_TABLES } from './encounters.js';
 import { EFFECT_TYPES } from './effect-types.js';
 import { EVENT_RULES } from './event-rules.js';
@@ -234,16 +235,29 @@ export function validateGameData() {
         if (![
           'continue',
           'full-heal',
-          'forget-random-skill',
+          'seal-random-skill',
+          'full-heal-start-combat',
           'start-combat',
+          'blood-unseal',
+          'reduce-max-hp-upgrade-skill',
+          'collector-challenge',
         ].includes(outcome.type)) {
           errors.push(`事件 ${event.id} 的結果類型不合法：${outcome.type}`);
         }
         if (!Number.isFinite(outcome.weight) || outcome.weight <= 0) {
           errors.push(`事件 ${event.id} 的結果權重必須大於0`);
         }
-        if (outcome.type === 'start-combat' && !['normal', 'elite', 'boss'].includes(outcome.rank)) {
+        if (
+          ['start-combat', 'full-heal-start-combat'].includes(outcome.type)
+          && !['normal', 'elite', 'boss'].includes(outcome.rank)
+        ) {
           errors.push(`事件 ${event.id} 的戰鬥階級不合法：${outcome.rank}`);
+        }
+        if (
+          outcome.type === 'collector-challenge'
+          && !['skill', 'equipment'].includes(outcome.rewardType)
+        ) {
+          errors.push(`事件 ${event.id} 的收藏家獎勵類型不合法`);
         }
       }
     }
@@ -423,6 +437,21 @@ function validateItemEffect(itemId, effect, errors) {
   }
   if (effect.statusId !== undefined) {
     checkReference(STATUSES, effect.statusId, `道具 ${itemId} 的效果`, errors);
+  }
+  if (
+    effect.damageSource !== undefined
+    && !DAMAGE_SOURCES.includes(effect.damageSource)
+  ) {
+    errors.push(`道具 ${itemId} 的傷害分類不合法：${effect.damageSource}`);
+  }
+  if (
+    effect.targets !== undefined
+    && (
+      !Array.isArray(effect.targets)
+      || effect.targets.some((target) => !['self', 'enemy'].includes(target))
+    )
+  ) {
+    errors.push(`道具 ${itemId} 的效果目標不合法`);
   }
   if (
     effect.chance !== undefined

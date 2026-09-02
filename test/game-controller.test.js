@@ -172,7 +172,7 @@ test('裝備選單可以開啟所選裝備的詳情', async () => {
   });
 
   const detail = await controller.handleComponent({
-    customId: 'slotbattle:equipment-select-controller:detail-equipment',
+    customId: 'slotbattle:equipment-select-controller:detail-equipment-1',
     userId: 'player-1',
     values: ['sword'],
   });

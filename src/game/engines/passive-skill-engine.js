@@ -15,9 +15,11 @@ const PASSIVE_SKILL_EFFECT_HANDLERS = Object.freeze({
 
 export function passiveSkillEffectEntries(
   player,
-  { trigger = null, type = null } = {},
+  { trigger = null, type = null, excludedSkillIds = [] } = {},
 ) {
+  const excluded = new Set(excludedSkillIds);
   return (player?.skillIds ?? []).flatMap((skillId) => {
+    if (excluded.has(skillId)) return [];
     const level = playerSkillLevel(player, skillId);
     if (level < 1) return [];
     const skill = getSkill(skillId);
@@ -36,7 +38,10 @@ export function passiveSkillEffectEntries(
  * 依資料順序串接；同類效果會一次交給同一個處理器決定疊加規則。
  */
 export function resolvePassiveSkillEffects(player, trigger, context = {}) {
-  const entries = passiveSkillEffectEntries(player, { trigger });
+  const entries = passiveSkillEffectEntries(player, {
+    trigger,
+    excludedSkillIds: context.sealedSkillIds ?? [],
+  });
   const entriesByType = groupEntriesByType(entries);
   let nextContext = structuredClone(context);
   const events = [];

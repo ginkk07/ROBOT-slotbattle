@@ -8,6 +8,7 @@ import {
   skillActivation,
   skillCost,
 } from '../game/data/skills.js';
+import { getStatus } from '../game/data/statuses.js';
 import {
   itemActionAvailability,
   skillActionAvailability,
@@ -48,6 +49,7 @@ function renderSkillDetail(state, skillId) {
         ? { name: '技能類型', value: '被動技能', inline: true }
         : { name: '法力消耗', value: String(skillCost(skill, level)), inline: true },
       { name: '效果', value: definition.description, inline: false },
+      ...relatedStatusFields(definition.effects, definition.passiveEffects),
       availabilityField(availability),
     ],
     useAction: availability.usable ? 'skill' : null,
@@ -73,11 +75,34 @@ function renderItemDetail(state, itemId) {
       { name: '稀有度', value: rarityLabel(item.rarity), inline: true },
       { name: '目前持有', value: holding, inline: true },
       { name: '效果', value: item.description, inline: false },
+      ...relatedStatusFields(item.effects, item.combatEffects, item.equipmentEffects),
       availabilityField(availability),
     ],
     useAction: availability.usable ? 'item' : null,
     contentId: itemId,
   });
+}
+
+function relatedStatusFields(...effectGroups) {
+  const statusIds = new Set();
+  const visit = (value) => {
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    if (!value || typeof value !== 'object') return;
+    if (typeof value.statusId === 'string') statusIds.add(value.statusId);
+    Object.values(value).forEach(visit);
+  };
+  effectGroups.forEach(visit);
+
+  if (statusIds.size < 1) return [];
+  const value = [...statusIds].map((statusId) => {
+    const status = getStatus(statusId);
+    const description = status.description ?? '效果依上方說明。';
+    return `${status.emoji} **${status.name}**｜${description}`;
+  }).join('\n');
+  return [{ name: '相關狀態', value, inline: false }];
 }
 
 function detailPayload({ state, title, fields, useAction, contentId }) {

@@ -170,35 +170,7 @@ export const SKILLS = createCatalog([
     cost: 3,
     levels: [
       {
-        description: '立即造成 5 點傷害，並有 60% 機率附加 3 層燃燒狀態。',
-        effects: [
-          { type: EffectType.DAMAGE, element: 'fire', amount: 5, target: 'enemy' },
-          {
-            type: EffectType.APPLY_STATUS,
-            statusId: 'burning',
-            target: 'enemy',
-            chance: 0.6,
-            stacks: 3,
-            potency: 1,
-          },
-        ],
-      },
-      {
-        description: '立即造成 5 點傷害，並有 60% 機率附加 4 層燃燒狀態。',
-        effects: [
-          { type: EffectType.DAMAGE, element: 'fire', amount: 5, target: 'enemy' },
-          {
-            type: EffectType.APPLY_STATUS,
-            statusId: 'burning',
-            target: 'enemy',
-            chance: 0.6,
-            stacks: 4,
-            potency: 1,
-          },
-        ],
-      },
-      {
-        description: '立即造成 5 點傷害，並有 60% 機率附加 5 層燃燒狀態。',
+        description: '立即造成 5 點額外傷害，並有 60% 機率附加 5 層燃燒狀態。',
         effects: [
           { type: EffectType.DAMAGE, element: 'fire', amount: 5, target: 'enemy' },
           {
@@ -207,6 +179,34 @@ export const SKILLS = createCatalog([
             target: 'enemy',
             chance: 0.6,
             stacks: 5,
+            potency: 1,
+          },
+        ],
+      },
+      {
+        description: '立即造成 5 點額外傷害，並有 60% 機率附加 10 層燃燒狀態。',
+        effects: [
+          { type: EffectType.DAMAGE, element: 'fire', amount: 5, target: 'enemy' },
+          {
+            type: EffectType.APPLY_STATUS,
+            statusId: 'burning',
+            target: 'enemy',
+            chance: 0.6,
+            stacks: 10,
+            potency: 1,
+          },
+        ],
+      },
+      {
+        description: '立即造成 5 點額外傷害，並有 60% 機率附加 15 層燃燒狀態。',
+        effects: [
+          { type: EffectType.DAMAGE, element: 'fire', amount: 5, target: 'enemy' },
+          {
+            type: EffectType.APPLY_STATUS,
+            statusId: 'burning',
+            target: 'enemy',
+            chance: 0.6,
+            stacks: 15,
             potency: 1,
           },
         ],
@@ -244,7 +244,7 @@ export const SKILLS = createCatalog([
     lootTags: ['ruins'],
     cost: 2,
     levels: [1, 2, 3].map((potency) => ({
-      description: `立即獲得 ${potency * 2} 點🛡️，並受到敵人攻擊時給予 ${potency} 層燃燒狀態。`,
+      description: `立即獲得 ${potency * 2} 點🛡️；敵人完成攻擊後，使敵人獲得 ${potency} 層燃燒，即使傷害被完全抵擋仍會觸發。`,
       effects: [
         {
           type: EffectType.GAIN_RESOURCE,
@@ -273,7 +273,7 @@ export const SKILLS = createCatalog([
     lootTags: ['ruins'],
     cost: 1,
     levels: [1, 2, 3].map((potency) => ({
-      description: `下次拉霸出現🛡️時，該次拉霸取得的護甲將對敵人造成護甲值＋${potency * 3}點傷害。`,
+      description: `下次拉霸出現🛡️時，依該次拉霸取得的護甲值＋${potency * 3}，對敵人造成額外傷害。`,
       effects: [{
         type: EffectType.APPLY_STATUS,
         statusId: 'shield-throw-ready',
@@ -294,7 +294,7 @@ export const SKILLS = createCatalog([
     lootTags: ['ruins'],
     cost: 2,
     levels: [1, 2, 3].map((multiplier) => ({
-      description: `對敵人造成目前🛡️ ${multiplier}倍的傷害，造成傷害後扣除一半的🛡️。`,
+      description: `依目前🛡️的 ${multiplier} 倍對敵人造成額外傷害，結算後扣除一半🛡️。`,
       effects: [{
         type: EffectType.DAMAGE_FROM_RESOURCE,
         resource: 'armor',
@@ -317,7 +317,7 @@ export const SKILLS = createCatalog([
     lootTags: ['ruins'],
     levels: [5, 4, 3].map((cost) => ({
       cost,
-      description: '3回合內，大幅提升拉霸出現🛡️的機率並降低⚔️機率。',
+      description: '持續3回合；每回合🛡️出現機率＋25個百分點、⚔️出現機率－25個百分點。',
       effects: [{
         type: EffectType.APPLY_STATUS,
         statusId: 'holy-shield',
