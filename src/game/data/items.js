@@ -481,7 +481,7 @@ export const ITEMS = createCatalog([
     id: 'summer-gift-anchor',
     name: '夏賜儀碇',
     rarity: ContentRarity.LEGENDARY,
-    description: '星海羅盤結算後，如果本回合沒有造成傷害，本場戰鬥❇️上限＋1，最多＋5；造成傷害時清除累積。',
+    description: '如果本回合沒有造成傷害，本場戰鬥❇️上限＋1，最多＋5；造成傷害時清除累積。',
     equipmentEffects: [{
       trigger: ItemEffectTrigger.PLAYER_TURN_END,
       type: ItemEffectType.INCREASE_ACTION_LIMIT_IF_NO_DAMAGE,

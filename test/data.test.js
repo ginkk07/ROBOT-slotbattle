@@ -138,6 +138,10 @@ test('玩家技能與道具共用effects，怪物技能使用獨立資料庫', (
   assert.equal(getItem('thorns').rarity, 'common');
   assert.equal(getItem('magic-stone').rarity, 'common');
   assert.equal(getItem('diamond').rarity, 'legendary');
+  assert.equal(
+    getItem('summer-gift-anchor').description,
+    '如果本回合沒有造成傷害，本場戰鬥❇️上限＋1，最多＋5；造成傷害時清除累積。',
+  );
   assert.equal(getItem('cursed-snake-scale').type, 'equipment');
   assert.equal(getMonsterSkill('guardian-strike').power, 1.25);
   assert.equal(
