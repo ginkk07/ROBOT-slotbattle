@@ -18,8 +18,9 @@
 | 地區的 Boss／奇遇／菁英機率與能力成長 | `src/game/data/regions.js` |
 | 各地區會抽到哪些普通／菁英／Boss | `src/game/data/encounters.js` |
 | 奇遇內容與結果 | `src/game/data/events.js` |
-| 奇遇稀有度 50／30／20 | `src/game/data/event-rules.js` |
-| 三選一數量與戰鬥獎勵稀有度 | `src/game/data/loot-tables.js` |
+| 奇遇稀有度 60／30／10 | `src/game/data/event-rules.js` |
+| 戰鬥掉落率、內容類型、三選一稀有度與金錢區間 | `src/game/data/loot-tables.js` |
+| 神秘商店商品數量、稀有度與價格倍率 | `src/game/data/shop-rules.js` |
 | 預設開局解鎖、技能／道具欄位、技能持有與等級上限 | `src/game/data/player-progression.js` |
 | 成就條件與解鎖內容 | `src/game/data/achievements.js` |
 | 稀有度代碼與玩家顯示名稱 | `src/game/data/rarities.js` |

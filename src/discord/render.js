@@ -13,6 +13,7 @@ import { getStatus } from '../game/data/statuses.js';
 import {
   GamePhase,
   GameStatus,
+  currentShopPrice,
   getEnemyIntent,
   isStunned,
 } from '../game/engine.js';
@@ -122,6 +123,8 @@ export function renderRules() {
       '使用 `/slotbattle profile`，可以各選擇開局技能與道具。',
       '',
       '每個玩家最多可以持有3個技能，技能等級上限為3級。',
+      '',
+      '擊敗怪物會獲得金錢；遇到神秘商店時，可以購買道具或提升目前持有的技能。',
     ].join('\n'),
   };
 
@@ -189,12 +192,16 @@ function renderCombat(state) {
 }
 
 function renderRewardChoice(state) {
+  const goldText = `獲得 🪙${state.lastCombatReward?.gold ?? 0}｜目前持有 🪙${state.player.gold}`;
   if (state.rewardChoices.length === 0) {
+    const rewardText = state.lastCombatReward?.dropped
+      ? '掉落判定成功，但目前沒有符合持有與等級規則的新獎勵。'
+      : '這次沒有掉落裝備或技能。';
     return {
       embeds: [{
         color: COLORS.reward,
         title: '🏆 戰鬥勝利',
-        description: `你擊敗了 **${state.enemy.name}**。目前沒有符合持有與等級規則的新獎勵。`,
+        description: `你擊敗了 **${state.enemy.name}**。${rewardText}\n${goldText}`,
         footer: { text: `目前共擊敗 ${state.adventure.defeatedUnitCount} 個單位` },
       }],
       components: [actionRow([
@@ -219,7 +226,7 @@ function renderRewardChoice(state) {
     embeds: [{
       color: COLORS.reward,
       title: '🏆 戰鬥勝利｜選擇獎勵',
-      description: `你擊敗了 **${state.enemy.name}**。${state.rewardChoices.length} 個可用選項各自獨立抽取稀有度，請選擇其中一個。`,
+      description: `你擊敗了 **${state.enemy.name}**。${state.rewardChoices.length} 個可用選項各自獨立抽取稀有度，請選擇其中一個。\n${goldText}`,
       fields,
       footer: { text: `目前共擊敗 ${state.adventure.defeatedUnitCount} 個單位` },
     }],
@@ -240,16 +247,18 @@ function renderRewardChoice(state) {
 function renderEvent(state) {
   const eventText = eventDisplayText(state.event);
   const progress = `地區 ${state.adventure.regionDepth}｜本區完成 ${state.adventure.regionProgress} 次遭遇`;
+  const embed = {
+    color: COLORS.event,
+    title: '冒險進度',
+    description: [
+      progress,
+      '',
+      `【奇遇】${eventText}`,
+    ].join('\n'),
+  };
+  if (state.event.stage === 'shop') embed.fields = shopFields(state);
   return {
-    embeds: [{
-      color: COLORS.event,
-      title: '冒險進度',
-      description: [
-        progress,
-        '',
-        `【奇遇】${eventText}`,
-      ].join('\n'),
-    }],
+    embeds: [embed],
     components: eventControls(state),
   };
 }
@@ -263,6 +272,7 @@ function eventDisplayText(event) {
       `魔導轉輪匣｜${formatReels(event.collector.reels)}`,
     ].join('\n');
   }
+  if (event.stage === 'shop') return event.prompt;
   return event.prompt ?? event.description;
 }
 
@@ -328,6 +338,38 @@ function eventControls(state) {
     ];
   }
 
+  if (event.stage === 'shop') {
+    const price = currentShopPrice(state);
+    const disabled = state.player.gold < price;
+    const rows = [];
+    const availableItems = event.shop.items.filter((offer) => !offer.purchased);
+    if (availableItems.length > 0) {
+      rows.push(actionRow(availableItems.map((offer) => button({
+        customId: gameCustomId(state.id, 'event-shop-item', offer.contentId),
+        label: `購買 ${getItem(offer.contentId).name}｜🪙${price}`,
+        style: BUTTON_STYLE.SUCCESS,
+        disabled,
+      }))));
+    }
+    if (event.skillChoices.length > 0) {
+      rows.push(actionRow(event.skillChoices.map((skillId) => button({
+        customId: gameCustomId(state.id, 'event-shop-skill', skillId),
+        label: `強化 ${getSkill(skillId).name}｜🪙${price}`,
+        style: BUTTON_STYLE.PRIMARY,
+        disabled,
+      }))));
+    }
+    rows.push(actionRow([
+      button({
+        customId: gameCustomId(state.id, 'event-shop-leave'),
+        label: '離開商店',
+        style: BUTTON_STYLE.SECONDARY,
+      }),
+      abandonButton(state.id),
+    ]));
+    return rows;
+  }
+
   throw new RangeError(`尚未支援的奇遇階段：${event.stage}`);
 }
 
@@ -357,6 +399,7 @@ function renderEndSummary(state) {
       description,
       fields: [
         { name: '擊敗單位', value: String(summary?.defeatedUnitCount ?? 0) },
+        { name: '最後持有金錢', value: `🪙${summary?.finalGold ?? 0}` },
         { name: '最後裝備配置', value: equipment.join('、') || '沒有裝備' },
         { name: '最後技能配置', value: skills.join('、') || '沒有技能' },
         { name: '本次達成成就', value: achievements.join('、') || '沒有新成就' },
@@ -519,7 +562,38 @@ function itemSelect(profile, selectedIds) {
 }
 
 function resourceLine(state) {
-  return `❇️ **${state.resources.action}**　🛡️ **${state.resources.armor}**　✨ **${state.resources.mana}**`;
+  return `❇️ **${state.resources.action}**　🛡️ **${state.resources.armor}**　✨ **${state.resources.mana}**　🪙 **${state.player.gold}**`;
+}
+
+function shopFields(state) {
+  const price = currentShopPrice(state);
+  const itemFields = state.event.shop.items.map((offer) => {
+    const item = getItem(offer.contentId);
+    return {
+      name: `${offer.purchased ? '✅ ' : ''}【${rarityLabel(offer.rarity)}】${item.name}`,
+      value: `${itemTypeLabel(item)}\n${item.description}`,
+      inline: false,
+    };
+  });
+  const skillFields = state.event.skillChoices.map((skillId) => {
+    const skill = getSkill(skillId);
+    const currentLevel = state.player.skillLevels[skillId];
+    const targetLevel = currentLevel + 1;
+    return {
+      name: `⚡技能強化｜${skill.name} Lv.${currentLevel} → Lv.${targetLevel}`,
+      value: getSkillLevelDefinition(skillId, targetLevel).description,
+      inline: false,
+    };
+  });
+  return [
+    {
+      name: `目前持有 🪙${state.player.gold}`,
+      value: `下一筆交易價格：🪙${price}｜本次已購買 ${state.event.shop.purchases} 次`,
+      inline: false,
+    },
+    ...itemFields,
+    ...skillFields,
+  ];
 }
 
 function lastSpinText(state) {

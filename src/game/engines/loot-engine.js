@@ -1,9 +1,10 @@
 import { ITEMS } from '../data/items.js';
 import { getLootTable } from '../data/loot-tables.js';
 import { ContentRarity } from '../data/rarities.js';
+import { SHOP_RULES } from '../data/shop-rules.js';
 import { SKILLS } from '../data/skills.js';
 import { skillRewardEligibility } from './skill-progression.js';
-import { pickWeighted } from './weighted-random.js';
+import { pickWeighted, randomInteger } from './weighted-random.js';
 
 /**
  * 獎勵候選不足時的稀有度補位順序。
@@ -56,7 +57,12 @@ export function rollRewardChoices(
     let selectedRarity = rolledRarity;
 
     for (const rarity of RARITY_FALLBACKS[rolledRarity]) {
-      selectedPool = rewardPool(rarity, regionTags, player)
+      selectedPool = rewardPool(
+        rarity,
+        regionTags,
+        player,
+        table.contentTypes,
+      )
         .filter((entry) => !choices.some((choice) => (
           choice.contentType === entry.contentType
           && choice.contentId === entry.contentId
@@ -85,6 +91,63 @@ export function rollRewardChoices(
   return choices;
 }
 
+/**
+ * 單場戰鬥先判定是否掉落內容，再給予該階級的固定區間金錢。
+ * 沒有掉落內容時 choices 為空，但金錢仍會取得。
+ */
+export function rollCombatRewards(
+  lootTableId,
+  options = {},
+) {
+  const table = getLootTable(lootTableId);
+  const rng = options.rng ?? Math.random;
+  const dropped = probabilityRoll(rng) < table.dropChance;
+  const gold = randomInteger(table.gold.minimum, table.gold.maximum, rng);
+  return {
+    dropped,
+    gold,
+    choices: dropped
+      ? rollRewardChoices(lootTableId, { ...options, rng })
+      : [],
+  };
+}
+
+/** 神秘商店固定抽出三件未重複的裝備／消耗品。 */
+export function rollShopItemChoices({
+  rng = Math.random,
+  regionTags = [],
+  player = { inventory: [], equipment: [] },
+} = {}) {
+  const choices = [];
+  for (let roll = 0; roll < SHOP_RULES.itemChoices; roll += 1) {
+    const rolledRarity = rollContentRarity(
+      SHOP_RULES.rarityWeights,
+      {},
+      rng,
+    );
+    let selectedPool = [];
+    let selectedRarity = rolledRarity;
+    for (const rarity of RARITY_FALLBACKS[rolledRarity]) {
+      selectedPool = shopItemPool(rarity, regionTags, player)
+        .filter((item) => !choices.some((choice) => choice.contentId === item.id));
+      if (selectedPool.length > 0) {
+        selectedRarity = rarity;
+        break;
+      }
+    }
+    if (selectedPool.length === 0) break;
+    const selected = pickWeighted(selectedPool, rng, (item) => item.lootWeight);
+    choices.push({
+      contentType: 'item',
+      contentId: selected.id,
+      itemType: selected.type,
+      rarity: selectedRarity,
+      purchased: false,
+    });
+  }
+  return choices;
+}
+
 // 保留名稱，讓既有資料工具不會直接中斷；新版回傳三選一候選內容。
 export const rollLoot = rollRewardChoices;
 
@@ -103,8 +166,9 @@ function rollContentRarity(baseWeights, modifiers, rng) {
   return pickWeighted(entries, rng).rarity;
 }
 
-function rewardPool(rarity, regionTags, player) {
-  const skills = Object.values(SKILLS)
+function rewardPool(rarity, regionTags, player, contentTypes = ['skill', 'equipment', 'consumable']) {
+  const allowed = new Set(contentTypes);
+  const skills = allowed.has('skill') ? Object.values(SKILLS)
     .filter((skill) => eligible(skill, rarity, regionTags))
     .flatMap((skill) => {
       const eligibility = skillRewardEligibility(player, skill.id);
@@ -114,7 +178,7 @@ function rewardPool(rarity, regionTags, player) {
         lootWeight: skill.lootWeight,
         ...eligibility,
       }] : [];
-    });
+    }) : [];
   const ownedItems = new Set([
     ...Object.values(player.equipment ?? {}),
     ...(player.inventory ?? [])
@@ -123,7 +187,9 @@ function rewardPool(rarity, regionTags, player) {
   ]);
   const items = Object.values(ITEMS)
     .filter((item) => (
-      eligible(item, rarity, regionTags) && !ownedItems.has(item.id)
+      allowed.has(item.type)
+      && eligible(item, rarity, regionTags)
+      && !ownedItems.has(item.id)
     ))
     .map((item) => ({
       contentType: 'item',
@@ -133,6 +199,22 @@ function rewardPool(rarity, regionTags, player) {
     }));
   const pool = [...skills, ...items];
   return pool;
+}
+
+function shopItemPool(rarity, regionTags, player) {
+  const ownedEquipment = new Set(Object.values(player.equipment ?? {}));
+  return Object.values(ITEMS).filter((item) => (
+    eligible(item, rarity, regionTags)
+    && (item.type !== 'equipment' || !ownedEquipment.has(item.id))
+  ));
+}
+
+function probabilityRoll(rng) {
+  const roll = rng();
+  if (!Number.isFinite(roll) || roll < 0 || roll >= 1) {
+    throw new RangeError('rng 必須回傳0（含）到1（不含）的數字');
+  }
+  return roll;
 }
 
 function eligible(content, rarity, regionTags) {

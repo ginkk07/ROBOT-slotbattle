@@ -15,6 +15,7 @@ import {
 import { PLAYER_PROGRESSION_RULES } from './player-progression.js';
 import { ContentRarity, EventRarity } from './rarities.js';
 import { REGIONS } from './regions.js';
+import { SHOP_RULES } from './shop-rules.js';
 import {
   PASSIVE_SKILL_EFFECT_TYPES,
   PASSIVE_SKILL_TRIGGERS,
@@ -193,6 +194,39 @@ export function validateGameData() {
       `掉落表 ${table.id} 的稀有度`,
       errors,
     );
+    if (!Number.isFinite(table.dropChance) || table.dropChance < 0 || table.dropChance > 1) {
+      errors.push(`掉落表 ${table.id} 的 dropChance 必須介於0與1`);
+    }
+    if (
+      !Array.isArray(table.contentTypes)
+      || table.contentTypes.length === 0
+      || table.contentTypes.some((type) => !['skill', 'equipment', 'consumable'].includes(type))
+    ) {
+      errors.push(`掉落表 ${table.id} 的 contentTypes 不合法`);
+    }
+    if (
+      !Number.isInteger(table.gold?.minimum)
+      || !Number.isInteger(table.gold?.maximum)
+      || table.gold.minimum < 0
+      || table.gold.maximum < table.gold.minimum
+    ) {
+      errors.push(`掉落表 ${table.id} 的金錢區間不合法`);
+    }
+  }
+
+  validateRarityWeights(
+    SHOP_RULES.rarityWeights,
+    Object.values(ContentRarity),
+    '神秘商店商品稀有度',
+    errors,
+  );
+  if (!Number.isInteger(SHOP_RULES.itemChoices) || SHOP_RULES.itemChoices < 1) {
+    errors.push('神秘商店的 itemChoices 必須是正整數');
+  }
+  for (const [key, value] of Object.entries(SHOP_RULES.pricing)) {
+    if (!Number.isFinite(value) || value <= 0) {
+      errors.push(`神秘商店 pricing.${key} 必須大於0`);
+    }
   }
 
   validateRarityWeights(
@@ -241,6 +275,7 @@ export function validateGameData() {
           'blood-unseal',
           'reduce-max-hp-upgrade-skill',
           'collector-challenge',
+          'open-shop',
         ].includes(outcome.type)) {
           errors.push(`事件 ${event.id} 的結果類型不合法：${outcome.type}`);
         }

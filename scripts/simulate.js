@@ -13,6 +13,7 @@ import {
   GamePhase,
   GameStatus,
   isStunned,
+  leaveShop,
   placeBet,
   spinCollectorEvent,
 } from '../src/game/engine.js';
@@ -90,6 +91,8 @@ function simulate(strategy, iterations, turnLimit) {
           state = spinCollectorEvent(state, 'none', {
             eventRng: probabilityRng,
           });
+        } else if (state.event.stage === 'shop') {
+          state = leaveShop(state);
         } else {
           state = completeEvent(state, {
             worldRng: probabilityRng,

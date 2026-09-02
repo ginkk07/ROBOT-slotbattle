@@ -19,7 +19,10 @@ import {
   createGame,
   endPlayerTurn,
   isStunned,
+  leaveShop,
   placeBet,
+  purchaseShopItem,
+  purchaseShopSkill,
   spinCollectorEvent,
   upgradeGameState,
   useItem,
@@ -348,6 +351,15 @@ function nextStateForAction(state, { action, value }, rngs) {
     return spinCollectorEvent(state, value, {
       eventRng: rngs.eventRng,
     });
+  }
+  if (action === 'event-shop-item') {
+    return purchaseShopItem(state, value);
+  }
+  if (action === 'event-shop-skill') {
+    return purchaseShopSkill(state, value);
+  }
+  if (action === 'event-shop-leave') {
+    return leaveShop(state);
   }
   if (action === 'event-continue') {
     return completeEvent(state, {

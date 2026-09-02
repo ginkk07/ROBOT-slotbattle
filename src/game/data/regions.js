@@ -10,8 +10,8 @@ export const REGIONS = createCatalog([
     bossEncounterTableId: 'ruins-boss-encounter',
     encounterRules: {
       boss: {
-        minimumCompletedEncounters: 4,
-        chancePerCompletedEncounter: 0.07,
+        minimumCompletedEncounters: 8,
+        chancePerCompletedEncounter: 0.05,
         // 地區 BOSS 被擊敗並進入勝利確認時，直接將玩家生命回復至上限。
         restorePlayerHpAfterVictory: true,
       },
@@ -24,8 +24,8 @@ export const REGIONS = createCatalog([
       },
     },
     scaling: {
-      maxHpPerDepth: 0.2,
-      baseDamagePerDepth: 0.2,
+      maxHpPerDepth: 0.5,
+      baseDamagePerDepth: 0.5,
     },
   },
 ], '地區庫');

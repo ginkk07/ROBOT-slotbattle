@@ -10,6 +10,7 @@ import {
 } from '../src/game/data/monster-skills.js';
 import { PLAYER_PROGRESSION_RULES } from '../src/game/data/player-progression.js';
 import { getRegion } from '../src/game/data/regions.js';
+import { SHOP_RULES } from '../src/game/data/shop-rules.js';
 import {
   PassiveSkillTrigger,
   SkillActivation,
@@ -175,12 +176,16 @@ test('可調整的全域平衡規則集中在資料層', () => {
   });
   assert.equal(getMonsterActionRule('normal').basicAttackChance, 0.6);
   assert.equal(getMonsterActionRule('boss').requiredSkillCount, 3);
-  assert.equal(region.encounterRules.boss.minimumCompletedEncounters, 4);
+  assert.equal(region.encounterRules.boss.minimumCompletedEncounters, 8);
+  assert.equal(region.encounterRules.boss.chancePerCompletedEncounter, 0.05);
   assert.equal(region.encounterRules.boss.restorePlayerHpAfterVictory, true);
   assert.equal(region.encounterRules.event.chance, 0.2);
   assert.equal(region.encounterRules.elite.baseChance, 0.12);
-  assert.equal(region.scaling.maxHpPerDepth, 0.2);
-  assert.equal(region.scaling.baseDamagePerDepth, 0.2);
+  assert.equal(region.scaling.maxHpPerDepth, 0.5);
+  assert.equal(region.scaling.baseDamagePerDepth, 0.5);
+  assert.equal(SHOP_RULES.pricing.basePrice, 38);
+  assert.equal(SHOP_RULES.pricing.regionMultiplier, 1.66);
+  assert.equal(SHOP_RULES.pricing.purchaseMultiplier, 1.77);
   assert.equal(PLAYER_PROGRESSION_RULES.startingSkillSlots, 1);
   assert.equal(PLAYER_PROGRESSION_RULES.startingItemSlots, 1);
   assert.deepEqual(

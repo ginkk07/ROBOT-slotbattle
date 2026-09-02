@@ -11,11 +11,15 @@ import {
   completeEvent,
   confirmCombatVictory,
   createGame,
+  currentShopPrice,
   endPlayerTurn,
   GamePhase,
   GameStatus,
   isStunned,
+  leaveShop,
   placeBet,
+  purchaseShopItem,
+  purchaseShopSkill,
   spinCollectorEvent,
   upgradeGameState,
   useItem,
@@ -75,7 +79,7 @@ function eventState(eventId, skillIds = ['power-strike']) {
 
 test('新戰鬥取得4點行動點，護甲與法力從0開始', () => {
   const state = game();
-  assert.equal(state.schemaVersion, 5);
+  assert.equal(state.schemaVersion, 6);
   assert.equal(state.phase, GamePhase.PLAYER_TURN);
   assert.deepEqual(state.resources, { action: 4, armor: 0, mana: 0 });
 });
@@ -426,6 +430,8 @@ test('擊敗怪物後先等待玩家確認，再進入獨立獎勵選擇', () =>
   state = confirmCombatVictory(state, { rewardRng: zero });
   assert.equal(state.phase, GamePhase.REWARD_CHOICE);
   assert.equal(state.rewardChoices.length, 3);
+  assert.equal(state.player.gold, 10);
+  assert.deepEqual(state.lastCombatReward, { gold: 10, dropped: true });
   assert.equal(state.adventure.defeatedUnitCount, 1);
 });
 
@@ -455,7 +461,7 @@ test('擊敗地區BOSS時生命回滿，普通敵人不觸發', () => {
   assert.equal(normalState.player.hp, 7);
 });
 
-test('選擇Boss獎勵後換區，敵人生命與基礎傷害提高20%', () => {
+test('選擇Boss獎勵後換區，敵人生命與基礎傷害提高50%', () => {
   let state = placeBet(game({
     initialEnemyUnitId: 'ruins-guardian',
     enemy: { maxHp: 2 },
@@ -472,8 +478,8 @@ test('選擇Boss獎勵後換區，敵人生命與基礎傷害提高20%', () => {
   assert.equal(state.adventure.regionDepth, 2);
   assert.equal(state.adventure.regionProgress, 0);
   assert.equal(state.enemy.rank, 'normal');
-  assert.equal(state.enemy.maxHp, 36);
-  assert.equal(state.enemy.baseDamage, 10);
+  assert.equal(state.enemy.maxHp, 45);
+  assert.equal(state.enemy.baseDamage, 12);
 });
 
 test('完成奇遇會增加地區進度並繼續下一次遭遇', () => {
@@ -601,6 +607,35 @@ test('遠古回響降低20%最大生命並讓玩家選擇一項未滿級技能�
   assert.match(state.event.result.text, /強擊.*Lv\.2/);
 });
 
+test('神秘商店共用價格累積購買道具與技能升級，離開後清空', () => {
+  let state = eventState('ruins-mysterious-shop');
+  state.player.gold = 500;
+  state = chooseEventOption(state, 'browse', {
+    eventRng: sequence([0, 0, 0, 0, 0, 0, 0]),
+  });
+
+  assert.equal(state.event.stage, 'shop');
+  assert.equal(state.event.shop.items.length, 3);
+  assert.equal(currentShopPrice(state), 38);
+
+  const itemId = state.event.shop.items[0].contentId;
+  state = purchaseShopItem(state, itemId);
+  assert.equal(state.player.gold, 462);
+  assert.equal(state.event.shop.items[0].purchased, true);
+  assert.equal(currentShopPrice(state), 68);
+
+  state = purchaseShopSkill(state, 'power-strike');
+  assert.equal(state.player.gold, 394);
+  assert.equal(state.player.skillLevels['power-strike'], 2);
+  assert.equal(state.event.shop.purchases, 2);
+  assert.equal(currentShopPrice(state), 120);
+
+  state = leaveShop(state);
+  assert.equal(state.event.stage, 'result');
+  assert.equal(state.event.shop, null);
+  assert.match(state.event.result.text, /購買 2 次.*106/);
+});
+
 test('神秘收藏家轉出三個相同符文時取得傳說裝備並保留賭注技能', () => {
   let state = eventState('ruins-mysterious-collector');
   state = chooseEventOption(state, 'challenge-item', {
@@ -678,7 +713,7 @@ test('舊版Boss戰存檔會升級為冒險格式', () => {
   legacy.resources = { action: 1, attack: 6, defense: 3, skill: 2 };
   const upgraded = upgradeGameState(legacy);
 
-  assert.equal(upgraded.schemaVersion, 5);
+  assert.equal(upgraded.schemaVersion, 6);
   assert.equal(upgraded.enemy.hp, 54);
   assert.deepEqual(upgraded.resources, { action: 1, armor: 3, mana: 2 });
   assert.equal(upgraded.adventure.regionDepth, 1);

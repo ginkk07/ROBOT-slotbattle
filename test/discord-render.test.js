@@ -12,6 +12,7 @@ import { renderContentDetail } from '../src/discord/content-detail.js';
 import {
   activateSkill,
   abandonGame,
+  chooseEventOption,
   confirmCombatVictory,
   createGame,
   GamePhase,
@@ -445,6 +446,41 @@ test('奇遇先顯示冒險進度，再顯示不公開名稱的奇遇內文', ()
     resultEmbed.description,
     '地區 1｜本區完成 0 次遭遇\n\n【奇遇】你覺得身體裡充滿活力，HP 回滿了。',
   );
+});
+
+test('神秘商店顯示金錢、下一筆價格、三件商品與技能升級', () => {
+  const event = getEvent('ruins-mysterious-shop');
+  let state = createGame({
+    id: 'shop-render',
+    ownerId: 'player-1',
+    config: { initialEnemyUnitId: 'ruins-sentinel' },
+    loadout: { skillIds: ['power-strike'], itemIds: [] },
+    monsterRng: () => 0,
+  });
+  state.phase = GamePhase.EVENT;
+  state.enemy = null;
+  state.player.gold = 100;
+  state.event = {
+    eventId: event.id,
+    name: event.name,
+    description: event.description,
+    rarity: event.rarity,
+    stage: 'choice',
+    options: event.options.map(({ id, label }) => ({ id, label })),
+    result: null,
+  };
+  state = chooseEventOption(state, 'browse', { eventRng: () => 0 });
+
+  const payload = renderGame(state);
+  const labels = payload.components.flatMap((row) => (
+    row.components.map((component) => component.label)
+  ));
+  assert.match(payload.embeds[0].fields[0].name, /🪙100/);
+  assert.match(payload.embeds[0].fields[0].value, /🪙38/);
+  assert.equal(payload.embeds[0].fields.length, 5);
+  assert.equal(labels.filter((label) => label.startsWith('購買 ')).length, 3);
+  assert.equal(labels.some((label) => label.startsWith('強化 強擊')), true);
+  assert.equal(labels.includes('離開商店'), true);
 });
 
 test('遊戲結束畫面顯示擊敗數量與最後技能道具配置', () => {

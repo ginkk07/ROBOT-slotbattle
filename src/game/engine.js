@@ -61,7 +61,10 @@ import {
   turnResourceRetentionRatio,
 } from './engines/equipment-engine.js';
 import { resolveEvent } from './engines/event-engine.js';
-import { rollRewardChoices } from './engines/loot-engine.js';
+import {
+  rollCombatRewards,
+  rollShopItemChoices,
+} from './engines/loot-engine.js';
 import { selectMonsterIntent } from './engines/monster-action-engine.js';
 import { resolvePassiveSkillEffects } from './engines/passive-skill-engine.js';
 import {
@@ -71,6 +74,7 @@ import {
   playerSkillLevel,
   skillMaximum,
 } from './engines/skill-progression.js';
+import { shopPrice } from './engines/shop-engine.js';
 import {
   advanceStatusDurations,
   attackStatusBonuses,
@@ -86,7 +90,7 @@ import { drawReels, resolveSymbolChances } from './random.js';
 import { scoreSpin } from './scoring.js';
 import { SYMBOL_META, SymbolId } from './symbols.js';
 
-export const GAME_STATE_VERSION = 5;
+export const GAME_STATE_VERSION = 6;
 
 export const GameStatus = Object.freeze({
   ACTIVE: 'active',
@@ -144,6 +148,7 @@ export function createGame({
       tags: [...playerUnit.tags],
       hp: config.playerMaxHp,
       maxHp: config.playerMaxHp,
+      gold: 0,
       skillIds: selectedSkillIds,
       skillLevels: Object.fromEntries(selectedSkillIds.map((skillId) => [skillId, 1])),
       inventory: startingItems.inventory,
@@ -155,6 +160,7 @@ export function createGame({
     enemy: null,
     event: null,
     rewardChoices: [],
+    lastCombatReward: null,
     pendingRegionAdvance: false,
     round: 0,
     resources: { action: 0, armor: 0, mana: 0 },
@@ -878,6 +884,9 @@ export function chooseEventOption(
   } else if (outcome.type === 'collector-challenge') {
     beginCollectorChallenge(next, outcome, eventRng);
     return next;
+  } else if (outcome.type === 'open-shop') {
+    beginMysteriousShop(next, outcome, eventRng);
+    return next;
   } else if (outcome.type !== 'continue') {
     throw new RangeError(`尚未支援的事件結果：${outcome.type}`);
   }
@@ -956,6 +965,71 @@ export function chooseEventSkill(
     rewardId: next.event.collector.rewardId,
   });
   resolveCollectorSpin(next, null, eventRng);
+  return next;
+}
+
+/** 目前神秘商店的下一筆交易價格。 */
+export function currentShopPrice(state) {
+  if (state.phase !== GamePhase.EVENT || state.event?.stage !== 'shop') {
+    throw new Error('目前不在神秘商店中');
+  }
+  return shopPrice(
+    state.adventure.regionDepth,
+    state.event.shop?.purchases ?? 0,
+  );
+}
+
+export function purchaseShopItem(state, itemId) {
+  const next = upgradeGameState(state);
+  assertEventStage(next, ['shop']);
+  const offer = next.event.shop?.items?.find((entry) => entry.contentId === itemId);
+  if (!offer || offer.purchased) throw new RangeError('這件商品目前無法購買');
+
+  const price = currentShopPrice(next);
+  payShopPrice(next, price);
+  applyReward(next.player, offer);
+  offer.purchased = true;
+  recordShopPurchase(next, {
+    purchaseType: 'item',
+    contentId: itemId,
+    price,
+  });
+  return next;
+}
+
+export function purchaseShopSkill(state, skillId) {
+  const next = upgradeGameState(state);
+  assertEventStage(next, ['shop']);
+  if (!next.event.skillChoices?.includes(skillId)) {
+    throw new RangeError('這項技能目前無法強化');
+  }
+
+  const price = currentShopPrice(next);
+  payShopPrice(next, price);
+  const granted = grantSkillReward(next.player, skillId);
+  Object.assign(next.player, granted.player);
+  next.event.skillChoices = upgradableSkillIds(next.player);
+  recordShopPurchase(next, {
+    purchaseType: 'skill',
+    contentId: skillId,
+    targetLevel: granted.targetLevel,
+    price,
+  });
+  return next;
+}
+
+export function leaveShop(state) {
+  const next = upgradeGameState(state);
+  assertEventStage(next, ['shop']);
+  const purchases = next.event.shop?.purchases ?? 0;
+  const totalSpent = next.event.shop?.totalSpent ?? 0;
+  const text = purchases > 0
+    ? `你結束交易並離開商店。本次共購買 ${purchases} 次，花費 🪙${totalSpent}。`
+    : '你沒有購買任何商品，向商人點頭後離開。';
+  setEventResult(next, {
+    id: 'shop-left',
+    type: 'open-shop',
+  }, text);
   return next;
 }
 
@@ -1104,6 +1178,53 @@ function beginCollectorChallenge(state, outcome, rng) {
     `收藏家向你展示了${outcome.rewardType === 'skill' ? '傳說技能' : '傳說裝備'}「${reward.name}」。`,
     '請選擇一項現有技能作為賭注。挑戰成功會保留賭注；失敗則永久失去該技能。',
   ].join('\n');
+}
+
+function beginMysteriousShop(state, outcome, rng) {
+  const region = getRegion(state.adventure.regionId);
+  const items = rollShopItemChoices({
+    rng,
+    regionTags: region.tags,
+    player: state.player,
+  });
+  state.event.stage = 'shop';
+  state.event.prompt = outcome.text;
+  state.event.skillChoices = upgradableSkillIds(state.player);
+  state.event.shop = {
+    purchases: 0,
+    totalSpent: 0,
+    items,
+  };
+  state.history.push({
+    type: 'event-shop-opened',
+    eventId: state.event.eventId,
+    regionDepth: state.adventure.regionDepth,
+    items: structuredClone(items),
+    skillIds: [...state.event.skillChoices],
+  });
+}
+
+function upgradableSkillIds(player) {
+  return (player.skillIds ?? []).filter((skillId) => (
+    playerSkillLevel(player, skillId) < skillMaximum(skillId)
+  ));
+}
+
+function payShopPrice(state, price) {
+  if (state.player.gold < price) {
+    throw new RangeError(`金錢不足，目前需要 🪙${price}`);
+  }
+  state.player.gold -= price;
+}
+
+function recordShopPurchase(state, purchase) {
+  state.event.shop.purchases += 1;
+  state.event.shop.totalSpent += purchase.price;
+  state.history.push({
+    type: 'event-shop-purchased',
+    eventId: state.event.eventId,
+    ...purchase,
+  });
 }
 
 function resolveCollectorSpin(state, lockIndex, rng) {
@@ -1255,6 +1376,7 @@ function setEventResult(state, outcome, text) {
   state.event.prompt = null;
   state.event.skillChoices = [];
   state.event.pendingOutcome = null;
+  state.event.shop = null;
   state.event.result = {
     outcomeId: outcome.id,
     type: outcome.type,
@@ -1295,6 +1417,12 @@ export function upgradeGameState(value) {
     return next;
   }
 
+  if (next.schemaVersion === 5) {
+    next.schemaVersion = GAME_STATE_VERSION;
+    ensureCurrentFields(next);
+    return next;
+  }
+
   if (next.schemaVersion === 3 || next.schemaVersion === 4) {
     migratePreItemExpansionState(next);
     next.schemaVersion = GAME_STATE_VERSION;
@@ -1319,6 +1447,7 @@ function startNextNode(state, {
   state.enemy = null;
   state.event = null;
   state.rewardChoices = [];
+  state.lastCombatReward = null;
   state.round = 0;
   clearTurnResources(state);
   state.combatModifiers = createCombatModifiers();
@@ -1396,6 +1525,7 @@ function startEventCombat(state, outcome, { rng, monsterRng }) {
   state.enemy = enemy;
   state.enemy.intent = selectMonsterIntent(state.enemy, { rng: monsterRng });
   state.rewardChoices = [];
+  state.lastCombatReward = null;
   state.round = 1;
   clearTurnResources(state);
   state.combatModifiers = createCombatModifiers();
@@ -1468,17 +1598,25 @@ function finishCombatVictory(state, { rewardRng }) {
   state.adventure.regionProgress += 1;
   state.pendingRegionAdvance = defeated.rank === UnitRank.BOSS;
   const region = getRegion(state.adventure.regionId);
-  state.rewardChoices = rollRewardChoices(defeated.lootTableId, {
+  const combatReward = rollCombatRewards(defeated.lootTableId, {
     rng: rewardRng,
     regionTags: region.tags,
     rarityModifiers: state.adventure.modifiers.rewardRarity,
     player: state.player,
   });
+  state.player.gold += combatReward.gold;
+  state.rewardChoices = combatReward.choices;
+  state.lastCombatReward = {
+    gold: combatReward.gold,
+    dropped: combatReward.dropped,
+  };
   state.phase = GamePhase.REWARD_CHOICE;
   state.history.push({
     type: 'combat-victory',
     unitId: defeated.unitId,
     rank: defeated.rank,
+    gold: combatReward.gold,
+    rewardDropped: combatReward.dropped,
     rewardChoices: structuredClone(state.rewardChoices),
   });
 }
@@ -1496,6 +1634,7 @@ function finishRun(state, status, defeatedBy) {
       state.adventure?.defeatedByRank ?? { normal: 0, elite: 0, boss: 0 },
     ),
     finalRegionDepth: state.adventure?.regionDepth ?? 1,
+    finalGold: state.player.gold,
     finalSkillIds,
     finalSkillLevels,
     finalEquipmentIds,
@@ -1509,6 +1648,7 @@ function finishRun(state, status, defeatedBy) {
   state.enemy = null;
   state.event = null;
   state.rewardChoices = [];
+  state.lastCombatReward = null;
   state.pendingRegionAdvance = false;
   clearTurnResources(state);
   state.player.activeStatuses = [];
@@ -1516,6 +1656,7 @@ function finishRun(state, status, defeatedBy) {
   state.player.inventory = [];
   state.player.equipment = [];
   state.player.skillIds = [];
+  state.player.gold = 0;
   state.adventure = null;
   state.history = [];
   state.lastSpin = null;
@@ -2415,6 +2556,7 @@ function applyEnemyOverrides(enemy, overrides) {
 
 function ensureCurrentFields(state) {
   state.player = normalizePlayerSkills(state.player);
+  state.player.gold = Math.max(0, Math.floor(Number(state.player.gold ?? 0)));
   state.player.activeStatuses ??= [];
   state.player.pendingSealedSkillIds ??= [];
   state.player.inventory ??= [];
@@ -2431,6 +2573,7 @@ function ensureCurrentFields(state) {
     },
   };
   state.rewardChoices ??= [];
+  state.lastCombatReward ??= null;
   if (state.lastImpact) {
     state.lastImpact.spinDamage ??= state.lastImpact.attackDamage ?? 0;
     state.lastImpact.additionalDamage ??= state.lastImpact.skillDamage ?? 0;
@@ -2445,6 +2588,13 @@ function ensureCurrentFields(state) {
     state.event.stage ??= 'choice';
     state.event.options ??= definition.options.map(({ id, label }) => ({ id, label }));
     state.event.result ??= null;
+    state.event.skillChoices ??= [];
+    if (state.event.stage === 'shop') {
+      state.event.shop ??= { purchases: 0, totalSpent: 0, items: [] };
+      state.event.shop.purchases ??= 0;
+      state.event.shop.totalSpent ??= 0;
+      state.event.shop.items ??= [];
+    }
   }
   if (state.enemy) {
     state.enemy.activeStatuses ??= [];
@@ -2550,6 +2700,7 @@ function upgradeLegacyState(legacy) {
     : GamePhase.ENDED;
   next.event = null;
   next.rewardChoices = [];
+  next.lastCombatReward = null;
   next.pendingRegionAdvance = false;
   next.combatModifiers = createCombatModifiers();
   next.endSummary = legacyStatus === GameStatus.ACTIVE ? null : {
@@ -2559,6 +2710,7 @@ function upgradeLegacyState(legacy) {
     defeatedUnitCount: 0,
     defeatedByRank: { normal: 0, elite: 0, boss: 0 },
     finalRegionDepth: 1,
+    finalGold: Number(next.player.gold ?? 0),
     finalSkillIds: [...(next.player.skillIds ?? [])],
     finalSkillLevels: Object.fromEntries(
       (next.player.skillIds ?? []).map((skillId) => [skillId, 1]),

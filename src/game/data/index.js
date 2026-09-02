@@ -34,6 +34,7 @@ export {
   rarityLabel,
 } from './rarities.js';
 export { REGIONS, getRegion } from './regions.js';
+export { SHOP_RULES } from './shop-rules.js';
 export {
   SKILLS,
   getSkill,

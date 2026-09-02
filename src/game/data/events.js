@@ -87,6 +87,36 @@ export const EVENTS = createCatalog([
     ],
   },
   {
+    id: 'ruins-mysterious-shop',
+    name: '神秘商店',
+    rarity: EventRarity.COMMON,
+    weight: 100,
+    tags: ['ruins'],
+    description: '一盞暖黃色的提燈在斷牆後亮起。披著斗篷的商人攤開三件來歷不明的貨物，也表示願意收費強化你已掌握的技能。店內每完成一次交易，下一筆價格都會提高。',
+    options: [
+      {
+        id: 'browse',
+        label: '查看商品',
+        outcomes: [{
+          id: 'shop-opened',
+          type: 'open-shop',
+          weight: 100,
+          text: '商人將三件商品推到你面前，並在價目牌上寫下第一筆交易的價格。',
+        }],
+      },
+      {
+        id: 'leave',
+        label: '直接離開',
+        outcomes: [{
+          id: 'shop-left-without-browsing',
+          type: 'continue',
+          weight: 100,
+          text: '你沒有停下腳步。提燈的光芒很快便消失在身後的黑暗裡。',
+        }],
+      },
+    ],
+  },
+  {
     id: 'ruins-abandoned-camp',
     name: '廢棄營地',
     rarity: EventRarity.COMMON,

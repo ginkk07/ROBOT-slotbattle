@@ -9,10 +9,16 @@ import {
   scaleEnemyUnit,
 } from '../src/game/engines/adventure-engine.js';
 import { drawEncounter } from '../src/game/engines/encounter-engine.js';
-import { rollRewardChoices } from '../src/game/engines/loot-engine.js';
+import {
+  rollCombatRewards,
+  rollRewardChoices,
+  rollShopItemChoices,
+} from '../src/game/engines/loot-engine.js';
+import { shopPrice } from '../src/game/engines/shop-engine.js';
 import { getMonsterActionRule } from '../src/game/data/monster-actions.js';
 import { selectMonsterIntent } from '../src/game/engines/monster-action-engine.js';
 import { getUnit } from '../src/game/data/units.js';
+import { getItem } from '../src/game/data/items.js';
 
 test('普通與菁英遭遇表只會抽出指定階級', () => {
   const normal = drawEncounter('ruins-normal-encounter', { rng: () => 0 });
@@ -36,14 +42,18 @@ test('第一次遭遇不會是奇遇，先依12%機率判斷菁英怪', () => {
   assert.equal(elite.enemy.rank, 'elite');
 });
 
-test('完成4次遭遇後，第5次先以28%機率判定Boss', () => {
+test('前8關不會遇到Boss，第9關以40%機率判定', () => {
   const progress = createAdventureProgress();
-  progress.regionProgress = 4;
-  progress.completedEncounters = 4;
+  progress.regionProgress = 7;
+  progress.completedEncounters = 7;
+  assert.equal(bossEncounterChance(progress), 0);
 
-  assert.equal(bossEncounterChance(progress), 0.28);
+  progress.regionProgress = 8;
+  progress.completedEncounters = 8;
+
+  assert.equal(bossEncounterChance(progress), 0.4);
   const node = drawNextAdventureNode(progress, {
-    rng: sequence([0.279, 0, 0]),
+    rng: sequence([0.399, 0, 0]),
   });
   assert.equal(node.type, 'combat');
   assert.equal(node.enemy.rank, 'boss');
@@ -51,8 +61,8 @@ test('完成4次遭遇後，第5次先以28%機率判定Boss', () => {
 
 test('Boss判定失敗後才以20%機率抽取奇遇，奇遇稀有度固定60/30/10', () => {
   const progress = createAdventureProgress();
-  progress.regionProgress = 4;
-  progress.completedEncounters = 4;
+  progress.regionProgress = 8;
+  progress.completedEncounters = 8;
 
   const node = drawNextAdventureNode(progress, {
     rng: sequence([0.9, 0.19, 0.79, 0]),
@@ -115,13 +125,13 @@ test('三個戰鬥獎勵選項會各自獨立抽取稀有度', () => {
 
   assert.deepEqual(choices.map((choice) => choice.rarity), [
     'common',
+    'common',
     'rare',
-    'legendary',
   ]);
   assert.equal(choices.length, 3);
 });
 
-test('Boss可從新增的傳說技能與裝備中抽出三個不重複獎勵', () => {
+test('Boss依50/50抽出稀有與傳說的不重複技能或裝備', () => {
   const choices = rollRewardChoices('ruins-boss-loot', {
     regionTags: ['ruins'],
     rng: sequence([0, 0, 0.5, 0.5, 0.9, 0.9]),
@@ -130,14 +140,14 @@ test('Boss可從新增的傳說技能與裝備中抽出三個不重複獎勵', (
   assert.equal(choices.length, 3);
   assert.deepEqual(
     choices.map((choice) => choice.rarity),
-    ['legendary', 'legendary', 'legendary'],
+    ['rare', 'legendary', 'legendary'],
   );
   assert.equal(new Set(choices.map((choice) => choice.contentId)).size, 3);
   assert.equal(choices.some((choice) => choice.contentType === 'item'), true);
 });
 
 test('持有但未滿等的技能可再次出現並升級，滿等後會排除', () => {
-  const upgradeChoices = rollRewardChoices('ruins-common-loot', {
+  const upgradeChoices = rollRewardChoices('ruins-elite-loot', {
     regionTags: ['ruins'],
     rng: () => 0,
     player: {
@@ -159,7 +169,7 @@ test('持有但未滿等的技能可再次出現並升級，滿等後會排除',
     { acquisition: 'level-up', currentLevel: 1, targetLevel: 2 },
   );
 
-  const maxedChoices = rollRewardChoices('ruins-common-loot', {
+  const maxedChoices = rollRewardChoices('ruins-elite-loot', {
     regionTags: ['ruins'],
     rng: () => 0,
     player: {
@@ -176,7 +186,7 @@ test('持有但未滿等的技能可再次出現並升級，滿等後會排除',
 });
 
 test('技能滿3個後不再出現新技能，但仍可出現未滿等技能升級', () => {
-  const choices = rollRewardChoices('ruins-common-loot', {
+  const choices = rollRewardChoices('ruins-elite-loot', {
     regionTags: ['ruins'],
     rng: () => 0,
     player: {
@@ -221,13 +231,13 @@ test('已持有的裝備與消耗品不會再次出現在獎勵中', () => {
   assert.equal(common.some((choice) => choice.contentId === 'healing-potion'), false);
 });
 
-test('換區只線性增加敵人的基礎生命與基礎傷害', () => {
+test('每次換區線性增加50%敵人基礎生命與基礎傷害', () => {
   const base = getUnit('ruins-guardian');
   const scaled = scaleEnemyUnit(base, 3);
 
-  assert.equal(regionPowerMultiplier(3), 1.4);
-  assert.equal(scaled.maxHp, 84);
-  assert.equal(scaled.baseDamage, 21);
+  assert.equal(regionPowerMultiplier(3), 2);
+  assert.equal(scaled.maxHp, 120);
+  assert.equal(scaled.baseDamage, 30);
   assert.deepEqual(scaled.damageResistances, base.damageResistances);
 });
 
@@ -274,7 +284,59 @@ test('普通怪與Boss在各自機率邊界切換成技能，技能傷害使用�
   });
   assert.equal(bossSkill.type, 'skill');
   assert.equal(bossSkill.skillId, 'ruin-overload');
-  assert.equal(bossSkill.damage, Math.ceil(boss.baseDamage * 1.75));
+  assert.equal(bossSkill.damage, 40);
+});
+
+test('普通、菁英與Boss依各自機率掉落獎勵並給予金錢', () => {
+  const normalMiss = rollCombatRewards('ruins-common-loot', {
+    regionTags: ['ruins'],
+    rng: sequence([0.1, 0]),
+  });
+  assert.deepEqual(normalMiss, { dropped: false, gold: 10, choices: [] });
+
+  const normalHit = rollCombatRewards('ruins-common-loot', {
+    regionTags: ['ruins'],
+    rng: sequence([0.099, 0.999, 0, 0, 0, 0, 0, 0]),
+  });
+  assert.equal(normalHit.dropped, true);
+  assert.equal(normalHit.gold, 20);
+  assert.equal(normalHit.choices.length, 3);
+  assert.equal(normalHit.choices.every((choice) => choice.contentType === 'item'), true);
+  assert.equal(normalHit.choices.every((choice) => (
+    getItem(choice.contentId).type === 'equipment'
+  )), true);
+
+  const elite = rollCombatRewards('ruins-elite-loot', {
+    regionTags: ['ruins'],
+    rng: sequence([0.749, 0.999, 0, 0, 0, 0, 0, 0]),
+  });
+  assert.equal(elite.gold, 30);
+  assert.equal(elite.choices.every((choice) => (
+    choice.contentType === 'item' || choice.contentType === 'skill'
+  )), true);
+
+  const boss = rollCombatRewards('ruins-boss-loot', {
+    regionTags: ['ruins'],
+    rng: sequence([0.999, 0.999, 0, 0, 0, 0, 0, 0]),
+  });
+  assert.equal(boss.dropped, true);
+  assert.equal(boss.gold, 80);
+});
+
+test('神秘商店商品稀有度90/9/1，價格依地區與購買次數進位', () => {
+  const choices = rollShopItemChoices({
+    regionTags: ['ruins'],
+    rng: sequence([0.899, 0, 0.9, 0, 0.99, 0]),
+  });
+  assert.deepEqual(choices.map((choice) => choice.rarity), [
+    'common',
+    'rare',
+    'legendary',
+  ]);
+  assert.equal(new Set(choices.map((choice) => choice.contentId)).size, 3);
+
+  assert.deepEqual([0, 1, 2].map((count) => shopPrice(1, count)), [38, 68, 120]);
+  assert.deepEqual([0, 1, 2].map((count) => shopPrice(2, count)), [64, 112, 198]);
 });
 
 function sequence(values) {
