@@ -205,12 +205,12 @@ test('拉霸結果只顯示實際傷害、護甲與法力', () => {
   assert.doesNotMatch(spin.value, /投入|強擊|狀態 \+|立即結果/);
 });
 
-test('手裡劍連擊會在玩家狀態顯示目前額外傷害', () => {
+test('強化手裡劍連擊會在玩家狀態顯示目前額外傷害', () => {
   let state = createGame({
     id: 'shuriken-buff-render-test',
     ownerId: 'player-1',
     config: { initialEnemyUnitId: 'ruins-sentinel' },
-    loadout: { skillIds: [], itemIds: ['shuriken'] },
+    loadout: { skillIds: [], itemIds: ['reinforced-shuriken'] },
   });
   state = placeBet(state, 1, {
     reels: [SymbolId.DEFENSE, SymbolId.DEFENSE, SymbolId.DEFENSE],

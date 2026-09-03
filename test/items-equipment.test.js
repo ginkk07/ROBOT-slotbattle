@@ -67,7 +67,7 @@ test('可頌與鐵盾在每個玩家回合開始時各觸發一次', () => {
   assert.equal(state.resources.armor, 5);
 });
 
-test('手裡劍額外傷害不受賭徒左手倍率影響', () => {
+test('手裡劍每次拉霸固定造成1點額外傷害且不受賭徒左手倍率影響', () => {
   let state = battle(['shuriken', 'gamblers-left-hand']);
   state = placeBet(state, 4, { reels: [ATTACK, DEFENSE, SKILL] });
 
@@ -76,16 +76,15 @@ test('手裡劍額外傷害不受賭徒左手倍率影響', () => {
   assert.equal(state.lastImpact.attackDamage, 9);
   assert.equal(state.lastImpact.damageMultiplier, 2);
   assert.equal(state.enemy.hp, 491);
-  assert.deepEqual(
-    state.player.activeStatuses.find((status) => status.statusId === 'shuriken-combo'),
-    {
-      statusId: 'shuriken-combo',
-      sourceUnitId: state.player.id ?? null,
-      remainingTurns: 1,
-      stacks: 1,
-      potency: 1,
-    },
+  assert.equal(
+    state.player.activeStatuses.some((status) => status.statusId === 'shuriken-combo'),
+    false,
   );
+
+  let missed = battle(['shuriken']);
+  missed = placeBet(missed, 1, { reels: [DEFENSE, DEFENSE, DEFENSE] });
+  assert.equal(missed.lastImpact.additionalDamage, 1);
+  assert.equal(missed.enemy.hp, missed.enemy.maxHp - 1);
 });
 
 test('長劍與強化版在戰鬥開始時分別獲得攻擊力＋1與＋5', () => {
@@ -107,16 +106,16 @@ test('長劍與強化版在戰鬥開始時分別獲得攻擊力＋1與＋5', () 
   assert.equal(attacked.lastImpact.spinDamage, 6);
 });
 
-test('強化手裡劍每次拉霸累積2點額外傷害', () => {
+test('強化手裡劍每次拉霸累積1點額外傷害', () => {
   let state = battle(['reinforced-shuriken']);
   state = placeBet(state, 1, { reels: [DEFENSE, DEFENSE, DEFENSE] });
-  assert.equal(state.lastImpact.additionalDamage, 2);
+  assert.equal(state.lastImpact.additionalDamage, 1);
   state = placeBet(state, 1, { reels: [DEFENSE, DEFENSE, DEFENSE] });
-  assert.equal(state.lastImpact.additionalDamage, 4);
+  assert.equal(state.lastImpact.additionalDamage, 2);
   assert.equal(
     state.player.activeStatuses.find((status) => status.statusId === 'shuriken-combo')
       ?.stacks,
-    4,
+    2,
   );
 });
 

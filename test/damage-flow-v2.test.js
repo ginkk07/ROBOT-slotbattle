@@ -63,7 +63,7 @@ test('拉霸公式只放大S與攻擊力，所有額外傷害逐筆獨立結算'
     reflect: 0,
   });
 
-  let progressive = battle({ itemIds: ['shuriken'] });
+  let progressive = battle({ itemIds: ['reinforced-shuriken'] });
   progressive = placeBet(progressive, 1, { reels: [DEFENSE, DEFENSE, DEFENSE] });
   assert.equal(progressive.lastImpact.additionalDamage, 1);
   progressive = placeBet(progressive, 1, { reels: [DEFENSE, DEFENSE, DEFENSE] });
