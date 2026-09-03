@@ -69,20 +69,19 @@ test('戰鬥面板使用自由投入、技能、道具與回合結束按鈕', ()
     ownerId: 'player-1',
     loadout: {
       skillIds: ['power-strike'],
-      itemIds: ['fire-bomb'],
+      itemIds: ['fire-bomb', 'sword'],
     },
   });
   const payload = renderGame(state);
-  const labels = payload.components
-    .flatMap((row) => row.components.map((component) => component.label));
+  const rows = payload.components.map((row) => (
+    row.components.map((component) => component.label ?? component.placeholder)
+  ));
 
-  assert.deepEqual(labels, [
-    '投入點數（剩餘 4）',
-    'ALL IN',
-    '強擊 Lv.1',
-    '火焰炸彈 ×1',
-    '回合結束',
-    '放棄遊戲',
+  assert.deepEqual(rows, [
+    ['投入1點', '投入全部', '自行輸入'],
+    ['強擊 Lv.1', '火焰炸彈 ×1'],
+    ['查看裝備'],
+    ['回合結束', '放棄遊戲'],
   ]);
   assert.equal(
     payload.components[0].components[1].custom_id,
@@ -90,10 +89,14 @@ test('戰鬥面板使用自由投入、技能、道具與回合結束按鈕', ()
   );
   assert.equal(
     payload.components[0].components[2].custom_id,
+    'slotbattle:render-test:wager',
+  );
+  assert.equal(
+    payload.components[1].components[0].custom_id,
     'slotbattle:render-test:detail-skill:power-strike',
   );
   assert.equal(
-    payload.components[0].components[3].custom_id,
+    payload.components[1].components[1].custom_id,
     'slotbattle:render-test:detail-item:fire-bomb',
   );
   assert.match(payload.embeds[0].description, /行動預告：/);
@@ -101,23 +104,19 @@ test('戰鬥面板使用自由投入、技能、道具與回合結束按鈕', ()
     JSON.stringify(payload.embeds[0]),
     /冒險進度|總擊敗|目前配置|可繼續投入|回合結束時清空/,
   );
-  assert.doesNotMatch(labels.join('、'), /投入1點|投入2點|投入3點|全部投入/);
 });
 
-test('沒有行動點或暈眩時會停用投入與ALL IN按鈕', () => {
+test('沒有行動點或暈眩時會停用三種投入按鈕', () => {
   const state = createGame({ id: 'all-in-disabled-test', ownerId: 'player-1' });
   state.resources.action = 0;
 
   let buttons = renderGame(state).components[0].components;
-  assert.equal(buttons[0].disabled, true);
-  assert.equal(buttons[1].label, 'ALL IN');
-  assert.equal(buttons[1].disabled, true);
+  assert.deepEqual(buttons.map((entry) => entry.disabled), [true, true, true]);
 
   state.resources.action = 4;
   state.stunned = true;
   buttons = renderGame(state).components[0].components;
-  assert.equal(buttons[0].disabled, true);
-  assert.equal(buttons[1].disabled, true);
+  assert.deepEqual(buttons.map((entry) => entry.disabled), [true, true, true]);
 });
 
 test('裝備在面板顯示為已穿戴而不是使用按鈕', () => {
@@ -219,7 +218,7 @@ test('手裡劍連擊會在玩家狀態顯示目前額外傷害', () => {
   const player = renderGame(state).embeds[0].fields.find(
     (field) => field.name.startsWith('👤'),
   );
-  assert.match(player.value, /🥷手裡劍連擊（額外傷害＋2）/);
+  assert.match(player.value, /🔺手裡劍連擊（額外傷害＋2）/);
 });
 
 test('技能詳情依目前可用性顯示使用與關閉按鈕', () => {
@@ -276,7 +275,7 @@ test('技能與道具詳情會顯示相關狀態的完整規則', () => {
   });
   const skillStatus = renderContentDetail(skillState, 'skill', 'flame-impact')
     .embeds[0].fields.find((field) => field.name === '相關狀態');
-  assert.match(skillStatus.value, /燃燒/);
+  assert.match(skillStatus.value, /🔻 \*\*燃燒\*\*/);
   assert.match(skillStatus.value, /層數除以2/);
 
   const itemState = createGame({
@@ -286,7 +285,7 @@ test('技能與道具詳情會顯示相關狀態的完整規則', () => {
   });
   const itemStatus = renderContentDetail(itemState, 'item', 'thorns')
     .embeds[0].fields.find((field) => field.name === '相關狀態');
-  assert.match(itemStatus.value, /傷害反射/);
+  assert.match(itemStatus.value, /🔺 \*\*傷害反射\*\*/);
   assert.match(itemStatus.value, /詛咒與反射傷害不會觸發/);
 });
 
@@ -426,7 +425,7 @@ test('戰鬥面板會分開顯示玩家與敵人的狀態', () => {
   const enemy = fields.find((field) => field.name.startsWith('👹'));
   const player = fields.find((field) => field.name.startsWith('👤'));
 
-  assert.match(enemy.value, /敵人狀態[\s\S]*燃燒 ×3/);
+  assert.match(enemy.value, /敵人狀態[\s\S]*🔻燃燒 ×3/);
   assert.match(player.value, /玩家狀態\*\*\n無/);
 });
 
@@ -440,7 +439,7 @@ test('怪物被動技能狀態只顯示名稱，不顯示說明或回合數', ()
   const enemy = renderGame(state).embeds[0].fields
     .find((field) => field.name.startsWith('👹'));
 
-  assert.match(enemy.value, /敵人狀態[\s\S]*🛡️護甲強化/);
+  assert.match(enemy.value, /敵人狀態[\s\S]*🔺護甲強化/);
   assert.doesNotMatch(enemy.value, /護甲強化.*回合|受到的傷害/);
 });
 
@@ -724,7 +723,7 @@ test('遊戲結束畫面顯示擊敗數量與最後技能道具配置', () => {
   assert.equal(payload.components[0].components[0].label, '開始新遊戲');
 });
 
-test('投入點數按鈕會建立可輸入剩餘行動點的Modal', () => {
+test('自行輸入按鈕會建立可輸入剩餘行動點的Modal', () => {
   const state = createGame({ id: 'modal-test', ownerId: 'player-1' });
   const modal = renderWagerModal(state);
   const input = modal.components[0].components[0];
@@ -738,7 +737,9 @@ test('投入點數按鈕會建立可輸入剩餘行動點的Modal', () => {
 test('玩法說明使用定稿文案，不顯示固定行動點或內部機率', () => {
   const description = renderRules().embeds[0].description;
   assert.match(description, /每回合開始時會獲得行動點/);
-  assert.match(description, /ALL IN/);
+  assert.match(description, /投入1點/);
+  assert.match(description, /投入全部/);
+  assert.match(description, /自行輸入/);
   assert.match(description, /一次投入，也可以拆成多次拉霸/);
   assert.match(description, /⚔️｜🛡️｜✨｜🍀｜💀/);
   assert.match(description, /🍀則會同時獲得上述全部效果/);

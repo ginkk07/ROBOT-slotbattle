@@ -21,12 +21,25 @@ import {
   getSkillLevelDefinition,
   skillCost,
 } from '../src/game/data/skills.js';
-import { getStatus } from '../src/game/data/statuses.js';
+import {
+  STATUSES,
+  STATUS_EMOJI,
+  StatusPolarity,
+  getStatus,
+} from '../src/game/data/statuses.js';
 import { getUnit } from '../src/game/data/units.js';
 import { validateGameData } from '../src/game/data/validate.js';
 
 test('所有遊戲資料庫的交叉引用都有效', () => {
   assert.equal(validateGameData(), true);
+});
+
+test('BUFF與DEBUFF分別使用統一圖示', () => {
+  assert.equal(STATUS_EMOJI[StatusPolarity.BUFF], '🔺');
+  assert.equal(STATUS_EMOJI[StatusPolarity.DEBUFF], '🔻');
+  for (const status of Object.values(STATUSES)) {
+    assert.equal(status.emoji, STATUS_EMOJI[status.polarity]);
+  }
 });
 
 test('單位以rank與tags區分普通、菁英與Boss', () => {

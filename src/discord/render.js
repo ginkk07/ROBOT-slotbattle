@@ -116,7 +116,7 @@ export function renderRules() {
     description: [
       '每回合開始時會獲得行動點。',
       '',
-      '按下「投入點數」可自行輸入數量；按下「ALL IN」則會直接投入目前剩餘的全部行動點。你可以一次投入，也可以拆成多次拉霸。',
+      '按下「投入1點」可快速投入1點；「投入全部」會直接投入目前剩餘的全部行動點；「自行輸入」則可指定數量。你可以一次投入，也可以拆成多次拉霸。',
       '',
       '牌面會出現 ⚔️｜🛡️｜✨｜🍀｜💀。相同圖案越多、投入點數越多，產生的效果就越強。',
       '',
@@ -495,27 +495,36 @@ function combatControls(state) {
   }
 
   const stunned = isStunned(state);
-  const actionButtons = [
+  const wagerDisabled = stunned || state.resources.action < 1;
+  const wagerButtons = [
     button({
-      customId: gameCustomId(state.id, 'wager'),
-      label: `投入點數（剩餘 ${state.resources.action}）`,
+      customId: gameCustomId(state.id, 'wager-one'),
+      label: '投入1點',
       emoji: '❇️',
       style: BUTTON_STYLE.PRIMARY,
-      disabled: stunned || state.resources.action < 1,
+      disabled: wagerDisabled,
     }),
     button({
       customId: gameCustomId(state.id, 'wager-all-in'),
-      label: 'ALL IN',
+      label: '投入全部',
       emoji: '🎰',
       style: BUTTON_STYLE.DANGER,
-      disabled: stunned || state.resources.action < 1,
+      disabled: wagerDisabled,
+    }),
+    button({
+      customId: gameCustomId(state.id, 'wager'),
+      label: '自行輸入',
+      emoji: '✏️',
+      style: BUTTON_STYLE.SECONDARY,
+      disabled: wagerDisabled,
     }),
   ];
 
+  const skillAndItemButtons = [];
   for (const skillId of state.player.skillIds) {
     const skill = getSkill(skillId);
     const skillLevel = state.player.skillLevels?.[skillId] ?? 1;
-    actionButtons.push(button({
+    skillAndItemButtons.push(button({
       customId: gameCustomId(state.id, 'detail-skill', skill.id),
       label: `${skill.name} Lv.${skillLevel}`,
       emoji: contentTypeEmoji('skill'),
@@ -526,7 +535,7 @@ function combatControls(state) {
   for (const { itemId, quantity } of state.player.inventory ?? []) {
     const item = getItem(itemId);
     if (quantity < 1) continue;
-    actionButtons.push(button({
+    skillAndItemButtons.push(button({
       customId: gameCustomId(state.id, 'detail-item', item.id),
       label: `${item.name} ×${quantity}`,
       emoji: contentTypeEmoji('consumable'),
@@ -536,8 +545,11 @@ function combatControls(state) {
 
   const equipmentIds = Object.values(state.player.equipment ?? {});
   const equipmentPages = chunk(equipmentIds, 25);
-  const maximumActionRows = Math.max(0, 4 - equipmentPages.length);
-  const rows = chunk(actionButtons, 5).slice(0, maximumActionRows).map(actionRow);
+  const maximumSkillAndItemRows = Math.max(0, 3 - equipmentPages.length);
+  const rows = [actionRow(wagerButtons)];
+  rows.push(...chunk(skillAndItemButtons, 5)
+    .slice(0, maximumSkillAndItemRows)
+    .map(actionRow));
   for (const [pageIndex, pageIds] of equipmentPages.entries()) {
     rows.push(actionRow([
       equipmentSelect(state, pageIds, pageIndex, equipmentIds.length, equipmentPages.length),
@@ -563,7 +575,7 @@ function equipmentSelect(state, equipmentIds, pageIndex, totalCount, pageCount) 
     type: COMPONENT_TYPE.STRING_SELECT,
     custom_id: gameCustomId(state.id, action),
     placeholder: pageCount === 1
-      ? `查看裝備（${totalCount}）`
+      ? '查看裝備'
       : `查看裝備（${firstNumber}–${lastNumber}／${totalCount}）`,
     min_values: 1,
     max_values: 1,

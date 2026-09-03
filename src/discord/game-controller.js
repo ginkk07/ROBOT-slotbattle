@@ -307,8 +307,9 @@ async function withGameLock({ busyGames, gameId }, callback) {
 }
 
 function nextStateForAction(state, { action, value }, rngs) {
-  if (action === 'wager-all-in') {
-    return placeBet(state, state.resources.action, {
+  if (action === 'wager-one' || action === 'wager-all-in') {
+    const wager = action === 'wager-one' ? 1 : state.resources.action;
+    return placeBet(state, wager, {
       rng: rngs.effectRng,
       rewardRng: rngs.rewardRng,
     });

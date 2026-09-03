@@ -6,6 +6,12 @@ export const StatusPolarity = Object.freeze({
   DEBUFF: 'debuff',
 });
 
+/** 所有狀態共用同一組分類圖示，避免戰鬥面板出現多套標示。 */
+export const STATUS_EMOJI = Object.freeze({
+  [StatusPolarity.BUFF]: '🔺',
+  [StatusPolarity.DEBUFF]: '🔻',
+});
+
 export const BossRuleMode = Object.freeze({
   NORMAL: 'normal',
   REDUCED: 'reduced',
@@ -52,7 +58,7 @@ export const STATUSES = createCatalog([
   {
     id: 'armor-reinforcement',
     name: '護甲強化',
-    emoji: '🛡️',
+    emoji: STATUS_EMOJI[StatusPolarity.BUFF],
     polarity: StatusPolarity.BUFF,
     category: 'damage-reduction',
     trigger: StatusTrigger.PASSIVE,
@@ -65,7 +71,7 @@ export const STATUSES = createCatalog([
   {
     id: 'power-strike-ready',
     name: '強擊',
-    emoji: '💥',
+    emoji: STATUS_EMOJI[StatusPolarity.BUFF],
     description: '下一次拉霸造成攻擊傷害時，依技能等級提高傷害倍率。',
     polarity: StatusPolarity.BUFF,
     category: 'attack-trigger',
@@ -79,7 +85,7 @@ export const STATUSES = createCatalog([
   {
     id: 'fire-imbue',
     name: '火焰附加',
-    emoji: '🔥',
+    emoji: STATUS_EMOJI[StatusPolarity.BUFF],
     description: '拉霸造成攻擊傷害時，依技能等級造成1／2／3點額外傷害，持續3回合。',
     polarity: StatusPolarity.BUFF,
     category: 'attack-trigger',
@@ -92,7 +98,7 @@ export const STATUSES = createCatalog([
   {
     id: 'shuriken-combo',
     name: '手裡劍連擊',
-    emoji: '🥷',
+    emoji: STATUS_EMOJI[StatusPolarity.BUFF],
     description: '每次拉霸時依裝備效果累積層數，並依目前層數造成額外傷害；玩家回合結束時解除。',
     polarity: StatusPolarity.BUFF,
     category: 'progressive-damage',
@@ -105,7 +111,7 @@ export const STATUSES = createCatalog([
   {
     id: 'shield-throw-ready',
     name: '盾牌投擲',
-    emoji: '🛡️',
+    emoji: STATUS_EMOJI[StatusPolarity.BUFF],
     description: '下次拉霸出現🛡️時，依該次取得的護甲與技能等級造成額外傷害，觸發後解除。',
     polarity: StatusPolarity.BUFF,
     category: 'resource-trigger',
@@ -126,7 +132,7 @@ export const STATUSES = createCatalog([
   {
     id: 'flame-cover',
     name: '烈火罩',
-    emoji: '🔥',
+    emoji: STATUS_EMOJI[StatusPolarity.BUFF],
     description: '敵人完成攻擊後，使敵人獲得燃燒；即使該次傷害被完全抵擋仍會觸發，觸發後解除。',
     polarity: StatusPolarity.BUFF,
     category: 'enemy-attack-reaction',
@@ -145,7 +151,7 @@ export const STATUSES = createCatalog([
   {
     id: 'holy-shield',
     name: '聖盾術',
-    emoji: '🛡️',
+    emoji: STATUS_EMOJI[StatusPolarity.BUFF],
     description: '每回合🛡️出現機率＋25個百分點、⚔️出現機率－25個百分點，持續3回合。',
     polarity: StatusPolarity.BUFF,
     category: 'symbol-chance',
@@ -164,7 +170,7 @@ export const STATUSES = createCatalog([
   {
     id: 'burning',
     name: '燃燒',
-    emoji: '🔥',
+    emoji: STATUS_EMOJI[StatusPolarity.DEBUFF],
     description: '回合開始時造成等同於目前層數的傷害，傷害結算後層數除以2；低於1層時解除。',
     polarity: StatusPolarity.DEBUFF,
     category: 'damage-over-time',
@@ -177,7 +183,7 @@ export const STATUSES = createCatalog([
   {
     id: 'damage-reflection',
     name: '傷害反射',
-    emoji: '🌵',
+    emoji: STATUS_EMOJI[StatusPolarity.BUFF],
     description: '實際受到HP傷害時，對傷害來源造成等同於目前層數的反射傷害。反射可被🛡️與指定的反射減傷抵擋，但不受抗性或一般減傷影響；詛咒與反射傷害不會觸發。',
     polarity: StatusPolarity.BUFF,
     category: 'damage-reaction',
@@ -191,7 +197,7 @@ export const STATUSES = createCatalog([
   {
     id: 'armor-break',
     name: '裝甲破壞',
-    emoji: '🔨',
+    emoji: STATUS_EMOJI[StatusPolarity.DEBUFF],
     description: '戰鬥中生效；每層裝甲破壞會在持有者受到攻擊傷害前，先移除1點🛡️，層數可累積。',
     polarity: StatusPolarity.DEBUFF,
     category: 'armor-break',
@@ -205,7 +211,7 @@ export const STATUSES = createCatalog([
   {
     id: 'curse',
     name: '詛咒',
-    emoji: '🕯️',
+    emoji: STATUS_EMOJI[StatusPolarity.DEBUFF],
     description: '受傷時，所有受詛咒單位承受詛咒傷害；各自傷害不超過自身詛咒層數。詛咒傷害無視一般減免且不會觸發詛咒或反射。',
     polarity: StatusPolarity.DEBUFF,
     category: 'shared-damage',
@@ -219,7 +225,7 @@ export const STATUSES = createCatalog([
   {
     id: 'poisoned',
     name: '中毒',
-    emoji: '☠️',
+    emoji: STATUS_EMOJI[StatusPolarity.DEBUFF],
     polarity: StatusPolarity.DEBUFF,
     category: 'damage-over-time',
     trigger: StatusTrigger.TURN_END,
@@ -236,7 +242,7 @@ export const STATUSES = createCatalog([
   {
     id: 'frozen',
     name: '冰凍',
-    emoji: '🧊',
+    emoji: STATUS_EMOJI[StatusPolarity.DEBUFF],
     polarity: StatusPolarity.DEBUFF,
     category: 'control',
     trigger: StatusTrigger.ACTION_START,
@@ -253,7 +259,7 @@ export const STATUSES = createCatalog([
   {
     id: 'stunned',
     name: '暈眩',
-    emoji: '💫',
+    emoji: STATUS_EMOJI[StatusPolarity.DEBUFF],
     polarity: StatusPolarity.DEBUFF,
     category: 'control',
     trigger: StatusTrigger.ACTION_START,
@@ -270,7 +276,7 @@ export const STATUSES = createCatalog([
   {
     id: 'attack-up',
     name: '攻擊力＋1',
-    emoji: '💪',
+    emoji: STATUS_EMOJI[StatusPolarity.BUFF],
     polarity: StatusPolarity.BUFF,
     category: 'stat-modifier',
     trigger: StatusTrigger.PASSIVE,
@@ -282,7 +288,7 @@ export const STATUSES = createCatalog([
   {
     id: 'weapon-attack-up-5',
     name: '攻擊力＋5',
-    emoji: '💪',
+    emoji: STATUS_EMOJI[StatusPolarity.BUFF],
     description: '攻擊力提升5點。',
     polarity: StatusPolarity.BUFF,
     category: 'stat-modifier',
@@ -296,7 +302,7 @@ export const STATUSES = createCatalog([
     // 與「長劍」的攻擊力＋1分開保存，避免兩種不同持續時間互相覆蓋。
     id: 'bounty-attack-up',
     name: '攻擊力＋3',
-    emoji: '💪',
+    emoji: STATUS_EMOJI[StatusPolarity.BUFF],
     polarity: StatusPolarity.BUFF,
     category: 'stat-modifier',
     trigger: StatusTrigger.PASSIVE,
@@ -308,7 +314,7 @@ export const STATUSES = createCatalog([
   {
     id: 'regeneration',
     name: '再生',
-    emoji: '🌿',
+    emoji: STATUS_EMOJI[StatusPolarity.BUFF],
     polarity: StatusPolarity.BUFF,
     category: 'healing-over-time',
     trigger: StatusTrigger.TURN_END,

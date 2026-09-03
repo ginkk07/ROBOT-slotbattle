@@ -59,12 +59,16 @@ test('共用控制器可以建立並重新顯示新版戰鬥', async () => {
   assert.equal(started.handled, true);
   assert.equal(started.payload.embeds[0].title, '🎰 地區 1｜第 1 回合');
   assert.equal(
-    resumed.payload.components[0].components[0].custom_id,
-    'slotbattle:controller-test:wager',
+    resumed.payload.components[0].components.map((component) => component.custom_id).join(','),
+    [
+      'slotbattle:controller-test:wager-one',
+      'slotbattle:controller-test:wager-all-in',
+      'slotbattle:controller-test:wager',
+    ].join(','),
   );
 });
 
-test('投入按鈕先開啟Modal，送出數字後才更新戰鬥', async () => {
+test('自行輸入按鈕先開啟Modal，送出數字後才更新戰鬥', async () => {
   const store = new MemoryGameStore();
   const controller = controllerFor(store, 'wager-test');
   await controller.handleCommand({
@@ -91,7 +95,7 @@ test('投入按鈕先開啟Modal，送出數字後才更新戰鬥', async () => 
   assert.ok(saved.state.enemy.hp < saved.state.enemy.maxHp);
 });
 
-test('ALL IN會直接投入全部剩餘行動點並拉霸', async () => {
+test('投入1點與投入全部都會直接拉霸', async () => {
   const store = new MemoryGameStore();
   const controller = controllerFor(store, 'all-in-test');
   await controller.handleCommand({
@@ -100,14 +104,24 @@ test('ALL IN會直接投入全部剩餘行動點並拉霸', async () => {
     userId: 'player-1',
   });
 
-  const result = await controller.handleComponent({
+  const wageredOne = await controller.handleComponent({
+    customId: 'slotbattle:all-in-test:wager-one',
+    userId: 'player-1',
+  });
+  let saved = await store.getSession('all-in-test');
+
+  assert.equal(wageredOne.modal, null);
+  assert.equal(saved.state.lastSpin.wager, 1);
+  assert.equal(saved.state.resources.action, 3);
+
+  const wageredAll = await controller.handleComponent({
     customId: 'slotbattle:all-in-test:wager-all-in',
     userId: 'player-1',
   });
-  const saved = await store.getSession('all-in-test');
+  saved = await store.getSession('all-in-test');
 
-  assert.equal(result.modal, null);
-  assert.equal(saved.state.lastSpin.wager, 4);
+  assert.equal(wageredAll.modal, null);
+  assert.equal(saved.state.lastSpin.wager, 3);
   assert.equal(saved.state.resources.action, 0);
   assert.ok(saved.state.enemy.hp < saved.state.enemy.maxHp);
 });

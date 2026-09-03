@@ -178,7 +178,7 @@ test('Google背景同步不會延後Discord戰鬥面板', async () => {
   await Promise.all(background);
 });
 
-test('投入按鈕會開啟Modal，送出數字後直接更新戰鬥訊息', async () => {
+test('自行輸入按鈕會開啟Modal，送出數字後直接更新戰鬥訊息', async () => {
   const store = new MemoryGameStore();
   const worker = createWorker({
     verifyRequest: async () => true,
@@ -191,7 +191,9 @@ test('投入按鈕會開啟Modal，送出數字後直接更新戰鬥訊息', asy
     {},
   );
   const startBody = await startResponse.json();
-  const customId = startBody.data.components[0].components[0].custom_id;
+  const customId = startBody.data.components[0].components.find(
+    (component) => component.custom_id.endsWith(':wager'),
+  ).custom_id;
 
   const modalResponse = await worker.fetch(
     interactionRequest(componentInteraction(customId)),
@@ -225,7 +227,7 @@ test('技能按鈕會在原戰鬥訊息顯示詳情卡', async () => {
     {},
   );
   const startBody = await startResponse.json();
-  const detailCustomId = startBody.data.components[0].components.find(
+  const detailCustomId = startBody.data.components.flatMap((row) => row.components).find(
     (component) => component.custom_id.includes(':detail-skill:'),
   ).custom_id;
 
