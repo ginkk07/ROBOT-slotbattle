@@ -46,6 +46,7 @@ const BUTTON_STYLE = Object.freeze({
 });
 
 const TEXT_INPUT_STYLE = Object.freeze({ SHORT: 1 });
+const WAGER_EMOJI = '❇️';
 
 export const WAGER_INPUT_ID = 'wager';
 
@@ -500,21 +501,21 @@ function combatControls(state) {
     button({
       customId: gameCustomId(state.id, 'wager-one'),
       label: '投入1點',
-      emoji: '❇️',
+      emoji: WAGER_EMOJI,
       style: BUTTON_STYLE.PRIMARY,
       disabled: wagerDisabled,
     }),
     button({
       customId: gameCustomId(state.id, 'wager-all-in'),
       label: '投入全部',
-      emoji: '🎰',
+      emoji: WAGER_EMOJI,
       style: BUTTON_STYLE.DANGER,
       disabled: wagerDisabled,
     }),
     button({
       customId: gameCustomId(state.id, 'wager'),
       label: '自行輸入',
-      emoji: '✏️',
+      emoji: WAGER_EMOJI,
       style: BUTTON_STYLE.SECONDARY,
       disabled: wagerDisabled,
     }),

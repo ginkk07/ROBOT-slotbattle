@@ -83,6 +83,10 @@ test('戰鬥面板使用自由投入、技能、道具與回合結束按鈕', ()
     ['查看裝備'],
     ['回合結束', '放棄遊戲'],
   ]);
+  assert.deepEqual(
+    payload.components[0].components.map((component) => component.emoji.name),
+    ['❇️', '❇️', '❇️'],
+  );
   assert.equal(
     payload.components[0].components[1].custom_id,
     'slotbattle:render-test:wager-all-in',
