@@ -54,7 +54,7 @@ export function upgradePlayerProfile(value, playerId = value?.playerId) {
   const source = value ? structuredClone(value) : {};
   const sourceVersion = Number(source.saveVersion ?? 0);
   if (sourceVersion < 4) {
-    // 舊版同名「燃焰之劍」是現在的普通「劍」，不可直接升成傳說裝備。
+    // 舊版同名「燃焰之劍」是現在的普通「長劍」，不可直接升成傳說裝備。
     source.unlockedStartingItemIds = replaceLegacyStarterSword(
       source.unlockedStartingItemIds,
     );
@@ -66,7 +66,7 @@ export function upgradePlayerProfile(value, playerId = value?.playerId) {
   }
   if (sourceVersion < 5) {
     // 舊玩家若選擇生命藥水或火焰炸彈，後面的配置檢查會自動退回
-    // 新選項中的第一件「劍」，不會留下已不可選的開局配置。
+    // 新選項中的第一件「長劍」，不會留下已不可選的開局配置。
     source.unlockedStartingItemIds = removePreV5DefaultStartingItems(
       source.unlockedStartingItemIds,
     );

@@ -2,9 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createGameController } from '../src/discord/game-controller.js';
+import { getEvent } from '../src/game/data/events.js';
+import { GamePhase } from '../src/game/engine.js';
 import { MemoryGameStore } from '../src/persistence/memory-store.js';
 
-function controllerFor(store, id = 'controller-test') {
+function controllerFor(store, id = 'controller-test', overrides = {}) {
   return createGameController({
     store,
     idGenerator: () => id,
@@ -12,7 +14,31 @@ function controllerFor(store, id = 'controller-test') {
     worldRng: () => 0.99,
     monsterRng: () => 0,
     rewardRng: () => 0,
+    ...overrides,
   });
+}
+
+async function moveSessionToEvent(store, gameId, eventId, updatePlayer = () => {}) {
+  const record = await store.getSession(gameId);
+  const event = getEvent(eventId);
+  record.state.phase = GamePhase.EVENT;
+  record.state.enemy = null;
+  record.state.event = {
+    eventId: event.id,
+    name: event.name,
+    rarity: event.rarity,
+    description: event.description,
+    stage: 'choice',
+    options: event.options.map(({ id, label, goldCost, itemCost }) => ({
+      id,
+      label,
+      ...(goldCost !== undefined ? { goldCost } : {}),
+      ...(itemCost !== undefined ? { itemCost: structuredClone(itemCost) } : {}),
+    })),
+    result: null,
+  };
+  updatePlayer(record.state.player);
+  await store.saveSession(record.state, { expectedRevision: record.revision });
 }
 
 test('共用控制器可以建立並重新顯示新版戰鬥', async () => {
@@ -62,6 +88,27 @@ test('投入按鈕先開啟Modal，送出數字後才更新戰鬥', async () => 
 
   assert.equal(submitted.payload.embeds[0].title, '🎰 地區 1｜第 1 回合');
   assert.equal(saved.state.resources.action, 2);
+  assert.ok(saved.state.enemy.hp < saved.state.enemy.maxHp);
+});
+
+test('ALL IN會直接投入全部剩餘行動點並拉霸', async () => {
+  const store = new MemoryGameStore();
+  const controller = controllerFor(store, 'all-in-test');
+  await controller.handleCommand({
+    commandName: 'slotbattle',
+    subcommand: 'start',
+    userId: 'player-1',
+  });
+
+  const result = await controller.handleComponent({
+    customId: 'slotbattle:all-in-test:wager-all-in',
+    userId: 'player-1',
+  });
+  const saved = await store.getSession('all-in-test');
+
+  assert.equal(result.modal, null);
+  assert.equal(saved.state.lastSpin.wager, 4);
+  assert.equal(saved.state.resources.action, 0);
   assert.ok(saved.state.enemy.hp < saved.state.enemy.maxHp);
 });
 
@@ -176,11 +223,72 @@ test('裝備選單可以開啟所選裝備的詳情', async () => {
     userId: 'player-1',
     values: ['sword'],
   });
-  assert.match(detail.payload.embeds[0].title, /📦 劍/);
+  assert.match(detail.payload.embeds[0].title, /📦 長劍/);
   assert.deepEqual(
     detail.payload.components[0].components.map((component) => component.label),
     ['關閉'],
   );
+});
+
+test('控制器可完成尋寶鐵匠的付款與武器選擇', async () => {
+  const store = new MemoryGameStore();
+  const controller = controllerFor(store, 'blacksmith-controller', {
+    eventRng: () => 0,
+  });
+  await controller.handleCommand({
+    commandName: 'slotbattle',
+    subcommand: 'start',
+    userId: 'player-1',
+  });
+  await moveSessionToEvent(
+    store,
+    'blacksmith-controller',
+    'ruins-treasure-blacksmith',
+    (player) => { player.gold = 20; },
+  );
+
+  const selectedPayment = await controller.handleComponent({
+    customId: 'slotbattle:blacksmith-controller:event-option:forge-risky',
+    userId: 'player-1',
+  });
+  assert.match(selectedPayment.payload.embeds[0].description, /選擇一件普通武器/);
+
+  const upgraded = await controller.handleComponent({
+    customId: 'slotbattle:blacksmith-controller:event-weapon:sword',
+    userId: 'player-1',
+  });
+  const saved = await store.getSession('blacksmith-controller');
+  assert.equal(saved.state.player.gold, 0);
+  assert.deepEqual(saved.state.player.equipment, ['reinforced-longsword']);
+  assert.match(upgraded.payload.embeds[0].description, /長劍\(強化\)/);
+});
+
+test('控制器可搜刮冒險者屍體並帶著既有收穫離開', async () => {
+  const store = new MemoryGameStore();
+  const controller = controllerFor(store, 'corpse-controller', {
+    eventRng: () => 0.99,
+  });
+  await controller.handleCommand({
+    commandName: 'slotbattle',
+    subcommand: 'start',
+    userId: 'player-1',
+  });
+  await moveSessionToEvent(store, 'corpse-controller', 'ruins-adventurer-corpse');
+
+  const searched = await controller.handleComponent({
+    customId: 'slotbattle:corpse-controller:event-option:search',
+    userId: 'player-1',
+  });
+  assert.match(searched.payload.embeds[0].description, /獲得 40 枚金幣/);
+
+  const left = await controller.handleComponent({
+    customId: 'slotbattle:corpse-controller:event-corpse-leave',
+    userId: 'player-1',
+  });
+  const saved = await store.getSession('corpse-controller');
+  assert.equal(saved.state.player.gold, 40);
+  assert.equal(saved.state.event.stage, 'result');
+  assert.match(left.payload.embeds[0].description, /帶著目前找到的財物離開/);
 });
 
 test('其他玩家無法操作別人的戰鬥面板', async () => {

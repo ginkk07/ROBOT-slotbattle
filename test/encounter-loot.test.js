@@ -104,9 +104,28 @@ test('遺跡奇遇池包含既有與新增奇遇', () => {
       'ruins-aged-explorer',
       'ruins-ornate-chest',
       'ruins-ancient-echo',
+      'ruins-treasure-blacksmith',
+      'ruins-adventurer-corpse',
       'ruins-mysterious-collector',
     ],
   );
+});
+
+test('尋寶中的鐵匠只會在玩家持有可強化武器時進入普通事件抽選', () => {
+  const progress = createAdventureProgress();
+  progress.completedEncounters = 1;
+
+  const withoutWeapon = drawNextAdventureNode(progress, {
+    rng: sequence([0, 0, 0.8]),
+    player: { equipment: [] },
+  });
+  assert.notEqual(withoutWeapon.event.id, 'ruins-treasure-blacksmith');
+
+  const withWeapon = drawNextAdventureNode(progress, {
+    rng: sequence([0, 0, 0.8]),
+    player: { equipment: ['sword'] },
+  });
+  assert.equal(withWeapon.event.id, 'ruins-treasure-blacksmith');
 });
 
 test('戰鬥獎勵稀有度修正不會改變奇遇稀有度或怪物階級', () => {

@@ -3,6 +3,7 @@ import { skillActionAvailability } from '../src/game/engines/action-availability
 import {
   activateSkill,
   chooseEventSkill,
+  chooseEventWeapon,
   chooseEventOption,
   chooseReward,
   chooseVaultReward,
@@ -16,6 +17,7 @@ import {
   isStunned,
   leaveShop,
   placeBet,
+  searchAdventurerCorpse,
   spinCollectorEvent,
 } from '../src/game/engine.js';
 
@@ -78,6 +80,10 @@ function simulate(strategy, iterations, turnLimit) {
         if (state.event.stage === 'choice') {
           const option = state.event.options.find((entry) => (
             Number(entry.goldCost ?? 0) <= state.player.gold
+            && (!entry.itemCost || state.player.inventory.some((stack) => (
+              stack.itemId === entry.itemCost.itemId
+              && stack.quantity >= entry.itemCost.quantity
+            )))
           )) ?? state.event.options.find((entry) => entry.id === 'leave');
           state = chooseEventOption(state, option.id, {
             eventRng: probabilityRng,
@@ -90,6 +96,15 @@ function simulate(strategy, iterations, turnLimit) {
         ].includes(state.event.stage)) {
           state = chooseEventSkill(state, state.event.skillChoices[0], {
             eventRng: probabilityRng,
+          });
+        } else if (state.event.stage === 'weapon-upgrade-choice') {
+          state = chooseEventWeapon(state, state.event.weaponChoices[0], {
+            eventRng: probabilityRng,
+          });
+        } else if (state.event.stage === 'corpse-search') {
+          state = searchAdventurerCorpse(state, {
+            eventRng: probabilityRng,
+            monsterRng: probabilityRng,
           });
         } else if (state.event.stage === 'collector-spin') {
           state = spinCollectorEvent(state, 'none', {

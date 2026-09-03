@@ -11,19 +11,30 @@ const CONSUMABLE_EMOJI = contentTypeEmoji('consumable');
  * 裝備只記錄「何時觸發」與「產生什麼效果」。戰鬥引擎依這些欄位
  * 統一結算，因此新增同類道具時不需要再用道具 ID 撰寫分支。
  */
-function equipment({ id, name, rarity, description, equipmentEffects }) {
+function equipment({
+  id,
+  name,
+  rarity,
+  description,
+  equipmentEffects,
+  lootEligible = true,
+  weaponUpgradeId = null,
+  weaponBaseId = null,
+}) {
   return {
     id,
     name,
     emoji: EQUIPMENT_EMOJI,
     type: 'equipment',
     rarity,
-    lootEligible: true,
+    lootEligible,
     lootWeight: 100,
     lootTags: ['ruins'],
     stackable: false,
     description,
     equipmentEffects,
+    ...(weaponUpgradeId ? { weaponUpgradeId } : {}),
+    ...(weaponBaseId ? { weaponBaseId } : {}),
   };
 }
 
@@ -57,8 +68,9 @@ function consumable({
 export const ITEMS = createCatalog([
   equipment({
     id: 'sword',
-    name: '劍',
+    name: '長劍',
     rarity: ContentRarity.COMMON,
+    weaponUpgradeId: 'reinforced-longsword',
     description: '戰鬥開始時獲得「攻擊力＋1」狀態，持續3回合。',
     equipmentEffects: [{
       trigger: ItemEffectTrigger.BATTLE_START,
@@ -153,10 +165,12 @@ export const ITEMS = createCatalog([
     id: 'shuriken',
     name: '手裡劍',
     rarity: ContentRarity.COMMON,
+    weaponUpgradeId: 'reinforced-shuriken',
     description: '每次拉霸使本回合手裡劍額外傷害＋1，回合結束時清零。',
     equipmentEffects: [{
       trigger: ItemEffectTrigger.AFTER_SPIN,
       type: ItemEffectType.INCREASE_EXTRA_DAMAGE_EACH_SPIN,
+      statusId: 'shuriken-combo',
       amount: 1,
       element: 'physical',
     }],
@@ -298,7 +312,109 @@ export const ITEMS = createCatalog([
       multiplier: 2,
     }],
   }),
+  equipment({
+    id: 'knight-hammer',
+    name: '騎士錘',
+    rarity: ContentRarity.COMMON,
+    weaponUpgradeId: 'reinforced-knight-hammer',
+    description: '拉霸攻擊成功時，依照使用的❇️使敵人獲得等量裝甲破壞。',
+    equipmentEffects: [{
+      trigger: ItemEffectTrigger.AFTER_SPIN_DAMAGE,
+      type: ItemEffectType.APPLY_ARMOR_BREAK_FROM_WAGER,
+      statusId: 'armor-break',
+      stacksPerWager: 1,
+      bonusDamageWhenUnarmored: false,
+      element: 'physical',
+    }],
+  }),
+  equipment({
+    id: 'crossbow',
+    name: '十字弓',
+    rarity: ContentRarity.COMMON,
+    weaponUpgradeId: 'reinforced-crossbow',
+    description: '當拉霸攻擊出現[牌面⚔️]3枚，該次攻擊將無視🛡️。',
+    equipmentEffects: [{
+      trigger: ItemEffectTrigger.SPIN_DAMAGE,
+      type: ItemEffectType.IGNORE_ARMOR,
+      requiresSymbolId: SymbolId.ATTACK,
+      requiresSymbolCount: 3,
+    }],
+  }),
 
+  equipment({
+    id: 'reinforced-longsword',
+    name: '長劍(強化)',
+    rarity: ContentRarity.RARE,
+    lootEligible: false,
+    weaponBaseId: 'sword',
+    description: '戰鬥開始時獲得「攻擊力＋5」狀態，持續3回合。',
+    equipmentEffects: [{
+      trigger: ItemEffectTrigger.BATTLE_START,
+      type: ItemEffectType.APPLY_EFFECTS,
+      effects: [{
+        type: 'apply-status',
+        statusId: 'weapon-attack-up-5',
+        target: 'self',
+        chance: 1,
+        duration: 3,
+        potency: 1,
+      }],
+    }],
+  }),
+  equipment({
+    id: 'reinforced-shuriken',
+    name: '手裡劍(強化)',
+    rarity: ContentRarity.RARE,
+    lootEligible: false,
+    weaponBaseId: 'shuriken',
+    description: '每次拉霸使本回合手裡劍額外傷害＋2，回合結束時清零。',
+    equipmentEffects: [{
+      trigger: ItemEffectTrigger.AFTER_SPIN,
+      type: ItemEffectType.INCREASE_EXTRA_DAMAGE_EACH_SPIN,
+      statusId: 'shuriken-combo',
+      amount: 2,
+      element: 'physical',
+    }],
+  }),
+  equipment({
+    id: 'reinforced-knight-hammer',
+    name: '騎士錘(強化)',
+    rarity: ContentRarity.RARE,
+    lootEligible: false,
+    weaponBaseId: 'knight-hammer',
+    description: '拉霸攻擊成功時，依照使用的❇️使敵人獲得等量裝甲破壞。若對方沒有🛡️，則造成等同於該次裝甲破壞層數的額外傷害。',
+    equipmentEffects: [{
+      trigger: ItemEffectTrigger.AFTER_SPIN_DAMAGE,
+      type: ItemEffectType.APPLY_ARMOR_BREAK_FROM_WAGER,
+      statusId: 'armor-break',
+      stacksPerWager: 1,
+      bonusDamageWhenUnarmored: true,
+      element: 'physical',
+    }],
+  }),
+  equipment({
+    id: 'reinforced-crossbow',
+    name: '十字弓(強化)',
+    rarity: ContentRarity.RARE,
+    lootEligible: false,
+    weaponBaseId: 'crossbow',
+    description: '當拉霸攻擊出現[牌面⚔️]3枚，該次攻擊將無視🛡️並造成雙倍傷害。',
+    equipmentEffects: [
+      {
+        trigger: ItemEffectTrigger.SPIN_DAMAGE,
+        type: ItemEffectType.IGNORE_ARMOR,
+        requiresSymbolId: SymbolId.ATTACK,
+        requiresSymbolCount: 3,
+      },
+      {
+        trigger: ItemEffectTrigger.SPIN_DAMAGE,
+        type: ItemEffectType.MULTIPLY_DAMAGE,
+        requiresSymbolId: SymbolId.ATTACK,
+        requiresSymbolCount: 3,
+        multiplier: 2,
+      },
+    ],
+  }),
   equipment({
     id: 'rune-cube',
     name: '符文魔方',

@@ -30,6 +30,8 @@ export const ItemEffectType = deepFreeze({
   GAIN_RESOURCE: 'gain-resource',
   BONUS_DAMAGE: 'bonus-damage',
   INCREASE_EXTRA_DAMAGE_EACH_SPIN: 'increase-extra-damage-each-spin',
+  APPLY_ARMOR_BREAK_FROM_WAGER: 'apply-armor-break-from-wager',
+  IGNORE_ARMOR: 'ignore-armor',
   MULTIPLY_DAMAGE: 'multiply-damage',
   REFUND_RESOURCE: 'refund-resource',
   PROMOTE_WITH_LUCKY: 'promote-with-lucky',

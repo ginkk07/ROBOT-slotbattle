@@ -2,6 +2,7 @@ import { getItem } from '../data/items.js';
 import { DamageSource } from '../data/damage-sources.js';
 import { ItemEffectTrigger, ItemEffectType } from '../data/item-effects.js';
 import { applyEffects } from './effects.js';
+import { mergeActiveStatus } from './status-engine.js';
 
 /**
  * 將舊版以部位物件保存的裝備轉成新版 ID 陣列。
@@ -94,17 +95,39 @@ export function promotesSymbolsWithLucky(player) {
   ).length > 0;
 }
 
-export function spinDamageModifiers(player, { wager, actionLimit }) {
+export function spinDamageModifiers(player, { wager, actionLimit, reels = [] }) {
   let multiplier = 1;
+  let ignoreArmor = false;
   for (const { effect } of equipmentEffectEntries(player, ItemEffectTrigger.SPIN_DAMAGE)) {
+    if (!matchesSymbolRequirement(effect, reels)) continue;
     if (
       effect.type === ItemEffectType.MULTIPLY_DAMAGE
       && (!effect.wagerEqualsActionLimit || wager === actionLimit)
     ) {
       multiplier *= effect.multiplier;
     }
+    if (effect.type === ItemEffectType.IGNORE_ARMOR) ignoreArmor = true;
   }
-  return { multiplier };
+  return { multiplier, ignoreArmor };
+}
+
+/** 騎士錘類武器在拉霸攻擊成功後，依投入點數建立破甲請求。 */
+export function spinAttackArmorBreakRequests(player, { wager, reels = [] } = {}) {
+  return equipmentEffectEntries(
+    player,
+    ItemEffectTrigger.AFTER_SPIN_DAMAGE,
+    ItemEffectType.APPLY_ARMOR_BREAK_FROM_WAGER,
+  ).filter(({ effect }) => matchesSymbolRequirement(effect, reels))
+    .map(({ itemId, effect }) => ({
+      itemId,
+      statusId: effect.statusId,
+      stacks: Math.max(0, Math.floor(
+        Number(wager) * Number(effect.stacksPerWager ?? 1),
+      )),
+      bonusDamageWhenUnarmored: effect.bonusDamageWhenUnarmored === true,
+      element: effect.element ?? 'physical',
+    }))
+    .filter((request) => request.stacks > 0);
 }
 
 /** 額外傷害至少為1時，元素瓶等裝備才會加入固定值。 */
@@ -116,6 +139,12 @@ export function extraDamageAmount(player, amount) {
     ItemEffectType.BONUS_DAMAGE,
   ).reduce((total, { effect }) => total + Number(effect.amount ?? 0), 0);
   return amount + bonus;
+}
+
+function matchesSymbolRequirement(effect, reels) {
+  if (!effect.requiresSymbolId) return true;
+  const count = reels.filter((symbolId) => symbolId === effect.requiresSymbolId).length;
+  return count >= Number(effect.requiresSymbolCount ?? 1);
 }
 
 /** 治療倍率依裝備資料套用，最後依指定規則取整。 */
@@ -202,18 +231,29 @@ export function consumeStatusRemovalEquipment(state, statusId) {
   return null;
 }
 
-/** 手裡劍每拉一次累積1層，該次就以累積值建立一筆額外傷害。 */
+/** 手裡劍每拉一次累積1層BUFF，該次就以目前層數建立額外傷害。 */
 export function progressiveSpinExtraDamageRequests(state) {
-  state.combatModifiers.progressiveSpinExtraDamage ??= {};
   const requests = [];
   for (const { itemId, effect } of equipmentEffectEntries(
     state.player,
     ItemEffectTrigger.AFTER_SPIN,
     ItemEffectType.INCREASE_EXTRA_DAMAGE_EACH_SPIN,
   )) {
-    const amount = Number(state.combatModifiers.progressiveSpinExtraDamage[itemId] ?? 0)
-      + Number(effect.amount ?? 0);
-    state.combatModifiers.progressiveSpinExtraDamage[itemId] = amount;
+    if (!effect.statusId) throw new Error(`${itemId}缺少累積傷害狀態ID`);
+    state.player.activeStatuses = mergeActiveStatus(
+      state.player.activeStatuses,
+      {
+        statusId: effect.statusId,
+        sourceUnitId: state.player.id ?? null,
+        remainingTurns: 1,
+        stacks: Number(effect.amount ?? 1),
+        potency: 1,
+      },
+    );
+    const active = state.player.activeStatuses.find(
+      (status) => status.statusId === effect.statusId,
+    );
+    const amount = Number(active?.stacks ?? 0);
     requests.push({ itemId, amount, element: effect.element ?? 'physical' });
   }
   return requests;

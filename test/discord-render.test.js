@@ -59,7 +59,7 @@ test('玩家資料頁可各選一個開局技能與道具', () => {
   );
   assert.deepEqual(
     payload.components[1].components[0].options.map((option) => option.label),
-    ['劍', '幸運草', '手裡劍'],
+    ['長劍', '幸運草', '手裡劍'],
   );
 });
 
@@ -78,6 +78,7 @@ test('戰鬥面板使用自由投入、技能、道具與回合結束按鈕', ()
 
   assert.deepEqual(labels, [
     '投入點數（剩餘 4）',
+    'ALL IN',
     '強擊 Lv.1',
     '火焰炸彈 ×1',
     '回合結束',
@@ -85,10 +86,14 @@ test('戰鬥面板使用自由投入、技能、道具與回合結束按鈕', ()
   ]);
   assert.equal(
     payload.components[0].components[1].custom_id,
-    'slotbattle:render-test:detail-skill:power-strike',
+    'slotbattle:render-test:wager-all-in',
   );
   assert.equal(
     payload.components[0].components[2].custom_id,
+    'slotbattle:render-test:detail-skill:power-strike',
+  );
+  assert.equal(
+    payload.components[0].components[3].custom_id,
     'slotbattle:render-test:detail-item:fire-bomb',
   );
   assert.match(payload.embeds[0].description, /行動預告：/);
@@ -97,6 +102,22 @@ test('戰鬥面板使用自由投入、技能、道具與回合結束按鈕', ()
     /冒險進度|總擊敗|目前配置|可繼續投入|回合結束時清空/,
   );
   assert.doesNotMatch(labels.join('、'), /投入1點|投入2點|投入3點|全部投入/);
+});
+
+test('沒有行動點或暈眩時會停用投入與ALL IN按鈕', () => {
+  const state = createGame({ id: 'all-in-disabled-test', ownerId: 'player-1' });
+  state.resources.action = 0;
+
+  let buttons = renderGame(state).components[0].components;
+  assert.equal(buttons[0].disabled, true);
+  assert.equal(buttons[1].label, 'ALL IN');
+  assert.equal(buttons[1].disabled, true);
+
+  state.resources.action = 4;
+  state.stunned = true;
+  buttons = renderGame(state).components[0].components;
+  assert.equal(buttons[0].disabled, true);
+  assert.equal(buttons[1].disabled, true);
 });
 
 test('裝備在面板顯示為已穿戴而不是使用按鈕', () => {
@@ -119,7 +140,7 @@ test('裝備在面板顯示為已穿戴而不是使用按鈕', () => {
   assert.match(player.value, /玩家狀態[\s\S]*攻擊力＋1（3回合）/);
   assert.deepEqual(
     equipmentSelect.options.map((option) => [option.label, option.emoji.name]),
-    [['劍', '📦']],
+    [['長劍', '📦']],
   );
 });
 
@@ -139,7 +160,7 @@ test('超過25件裝備時分頁顯示且不遺漏任何裝備', () => {
     .filter((component) => component.custom_id?.includes(':detail-equipment-'));
 
   assert.ok(payload.components.length <= 5);
-  assert.deepEqual(selects.map((select) => select.options.length), [25, 8]);
+  assert.deepEqual(selects.map((select) => select.options.length), [25, 14]);
   assert.deepEqual(
     selects.flatMap((select) => select.options.map((option) => option.value)),
     equipmentIds,
@@ -179,6 +200,26 @@ test('拉霸結果只顯示實際傷害、護甲與法力', () => {
   assert.match(spin.value, /╔═══════════╗/);
   assert.match(spin.value, /拉霸結果：造成 3 傷害／護甲 \+1／法力 \+1/);
   assert.doesNotMatch(spin.value, /投入|強擊|狀態 \+|立即結果/);
+});
+
+test('手裡劍連擊會在玩家狀態顯示目前額外傷害', () => {
+  let state = createGame({
+    id: 'shuriken-buff-render-test',
+    ownerId: 'player-1',
+    config: { initialEnemyUnitId: 'ruins-sentinel' },
+    loadout: { skillIds: [], itemIds: ['shuriken'] },
+  });
+  state = placeBet(state, 1, {
+    reels: [SymbolId.DEFENSE, SymbolId.DEFENSE, SymbolId.DEFENSE],
+  });
+  state = placeBet(state, 1, {
+    reels: [SymbolId.DEFENSE, SymbolId.DEFENSE, SymbolId.DEFENSE],
+  });
+
+  const player = renderGame(state).embeds[0].fields.find(
+    (field) => field.name.startsWith('👤'),
+  );
+  assert.match(player.value, /🥷手裡劍連擊（額外傷害＋2）/);
 });
 
 test('技能詳情依目前可用性顯示使用與關閉按鈕', () => {
@@ -480,6 +521,115 @@ test('密封石室揭示裝備效果後顯示收下與放回按鈕', () => {
   assert.deepEqual(labels, ['收下裝備', '放回石臺', '放棄遊戲']);
 });
 
+test('尋寶中的鐵匠只顯示玩家持有的可強化武器', () => {
+  const event = getEvent('ruins-treasure-blacksmith');
+  let state = createGame({
+    id: 'forgemaster-render',
+    ownerId: 'player-1',
+    config: { initialEnemyUnitId: 'ruins-sentinel' },
+    loadout: { skillIds: [], itemIds: ['sword', 'shuriken', 'iron-shield'] },
+    monsterRng: () => 0,
+  });
+  state.phase = GamePhase.EVENT;
+  state.enemy = null;
+  state.event = {
+    eventId: event.id,
+    name: event.name,
+    description: event.description,
+    rarity: event.rarity,
+    stage: 'choice',
+    options: event.options.map(({ id, label, goldCost, itemCost }) => ({
+      id,
+      label,
+      ...(goldCost !== undefined ? { goldCost } : {}),
+      ...(itemCost !== undefined ? { itemCost: structuredClone(itemCost) } : {}),
+    })),
+    result: null,
+  };
+  state.player.gold = 20;
+  state = chooseEventOption(state, 'forge-risky', { eventRng: () => 0 });
+
+  const labels = renderGame(state).components[0].components.map(
+    (component) => component.label,
+  );
+  assert.deepEqual(labels, [
+    '長劍 → 長劍(強化)',
+    '手裡劍 → 手裡劍(強化)',
+  ]);
+});
+
+test('尋寶中的鐵匠會依金幣與磨刀石持有狀態停用選項', () => {
+  const event = getEvent('ruins-treasure-blacksmith');
+  const state = createGame({
+    id: 'blacksmith-cost-render',
+    ownerId: 'player-1',
+    config: { initialEnemyUnitId: 'ruins-sentinel' },
+    loadout: { skillIds: [], itemIds: ['sword'] },
+    monsterRng: () => 0,
+  });
+  state.phase = GamePhase.EVENT;
+  state.enemy = null;
+  state.player.gold = 20;
+  state.event = {
+    eventId: event.id,
+    name: event.name,
+    description: event.description,
+    rarity: event.rarity,
+    stage: 'choice',
+    options: event.options.map(({ id, label, goldCost, itemCost }) => ({
+      id,
+      label,
+      ...(goldCost !== undefined ? { goldCost } : {}),
+      ...(itemCost !== undefined ? { itemCost: structuredClone(itemCost) } : {}),
+    })),
+    result: null,
+  };
+
+  const buttons = renderGame(state).components[0].components;
+  assert.deepEqual(
+    buttons.map((entry) => [entry.label, entry.disabled]),
+    [
+      ['支付20枚金幣', false],
+      ['交付磨刀石與20枚金幣', true],
+      ['拒絕並離開', false],
+    ],
+  );
+});
+
+test('冒險者屍體安全搜刮後顯示繼續與離開選項', () => {
+  const event = getEvent('ruins-adventurer-corpse');
+  let state = createGame({
+    id: 'corpse-render',
+    ownerId: 'player-1',
+    config: { initialEnemyUnitId: 'ruins-sentinel' },
+    loadout: { skillIds: [], itemIds: [] },
+    monsterRng: () => 0,
+  });
+  state.phase = GamePhase.EVENT;
+  state.enemy = null;
+  state.event = {
+    eventId: event.id,
+    name: event.name,
+    description: event.description,
+    rarity: event.rarity,
+    stage: 'choice',
+    options: event.options.map(({ id, label }) => ({ id, label })),
+    result: null,
+  };
+  state = chooseEventOption(state, 'search', {
+    eventRng: sequence([0, 0.25, 0.5, 0]),
+  });
+
+  const labels = renderGame(state).components.flatMap((row) => (
+    row.components.map((component) => component.label)
+  ));
+  assert.deepEqual(labels, [
+    '繼續搜刮',
+    '帶著目前的收穫離開',
+    '放棄遊戲',
+  ]);
+});
+
 test('年邁探險家的資助按鈕會在金幣不足時停用', () => {
   const event = getEvent('ruins-aged-explorer');
   const state = createGame({
@@ -588,6 +738,7 @@ test('投入點數按鈕會建立可輸入剩餘行動點的Modal', () => {
 test('玩法說明使用定稿文案，不顯示固定行動點或內部機率', () => {
   const description = renderRules().embeds[0].description;
   assert.match(description, /每回合開始時會獲得行動點/);
+  assert.match(description, /ALL IN/);
   assert.match(description, /一次投入，也可以拆成多次拉霸/);
   assert.match(description, /⚔️｜🛡️｜✨｜🍀｜💀/);
   assert.match(description, /🍀則會同時獲得上述全部效果/);
@@ -596,3 +747,8 @@ test('玩法說明使用定稿文案，不顯示固定行動點或內部機率',
   assert.match(description, /最多可以持有3個技能，技能等級上限為3級/);
   assert.doesNotMatch(description, /4 點行動點|30%|最多拉霸|結束抽選/);
 });
+
+function sequence(values) {
+  let index = 0;
+  return () => values[index++];
+}

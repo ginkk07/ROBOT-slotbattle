@@ -184,6 +184,27 @@ export function validateGameData() {
     }
   }
 
+  for (const item of Object.values(ITEMS)) {
+    if (item.weaponUpgradeId !== undefined) {
+      checkReference(ITEMS, item.weaponUpgradeId, `武器 ${item.id} 的強化目標`, errors);
+      if (item.rarity !== ContentRarity.COMMON) {
+        errors.push(`可強化武器 ${item.id} 必須是普通稀有度`);
+      }
+      if (ITEMS[item.weaponUpgradeId]?.weaponBaseId !== item.id) {
+        errors.push(`武器 ${item.id} 與強化目標的對應不一致`);
+      }
+    }
+    if (item.weaponBaseId !== undefined) {
+      checkReference(ITEMS, item.weaponBaseId, `強化武器 ${item.id} 的基礎武器`, errors);
+      if (item.rarity !== ContentRarity.RARE) {
+        errors.push(`強化武器 ${item.id} 必須是稀有稀有度`);
+      }
+      if (item.lootEligible !== false) {
+        errors.push(`強化武器 ${item.id} 只能由重鑄奇遇取得`);
+      }
+    }
+  }
+
   for (const table of Object.values(LOOT_TABLES)) {
     if (!Number.isInteger(table.choices) || table.choices < 1) {
       errors.push(`掉落表 ${table.id} 的 choices 必須是正整數`);
@@ -267,6 +288,15 @@ export function validateGameData() {
       ) {
         errors.push(`事件 ${event.id} 的選項 ${option.id} 金錢需求不合法`);
       }
+      if (option.itemCost !== undefined) {
+        checkReference(ITEMS, option.itemCost.itemId, `事件 ${event.id} 的選項消耗品`, errors);
+        if (ITEMS[option.itemCost.itemId]?.type !== 'consumable') {
+          errors.push(`事件 ${event.id} 的選項 ${option.id} 只能要求消耗品`);
+        }
+        if (!Number.isInteger(option.itemCost.quantity) || option.itemCost.quantity < 1) {
+          errors.push(`事件 ${event.id} 的選項 ${option.id} 消耗數量不合法`);
+        }
+      }
       if (!Array.isArray(option.outcomes) || option.outcomes.length === 0) {
         errors.push(`事件 ${event.id} 的選項 ${option.id} 至少需要一個結果`);
         continue;
@@ -280,6 +310,8 @@ export function validateGameData() {
           'start-combat',
           'blood-unseal',
           'reduce-max-hp-upgrade-skill',
+          'begin-weapon-upgrade',
+          'search-adventurer-corpse',
           'collector-challenge',
           'open-shop',
           'gain-gold',
@@ -319,6 +351,39 @@ export function validateGameData() {
         }
         if (outcome.type === 'grant-random-reward') {
           checkReference(LOOT_TABLES, outcome.lootTableId, `事件 ${event.id} 的獎勵掉落表`, errors);
+        }
+        if (
+          outcome.type === 'begin-weapon-upgrade'
+          && (!Number.isFinite(outcome.successChance)
+            || outcome.successChance < 0
+            || outcome.successChance > 1)
+        ) {
+          errors.push(`事件 ${event.id} 的武器強化成功率不合法`);
+        }
+        if (outcome.type === 'search-adventurer-corpse') {
+          const weights = outcome.lootWeights ?? {};
+          if (['consumable', 'weapon', 'gold'].some((type) => (
+            !Number.isFinite(weights[type]) || weights[type] <= 0
+          ))) {
+            errors.push(`事件 ${event.id} 的屍體戰利品權重不合法`);
+          }
+          if (
+            !Number.isInteger(outcome.gold?.minimum)
+            || !Number.isInteger(outcome.gold?.maximum)
+            || outcome.gold.minimum < 0
+            || outcome.gold.maximum < outcome.gold.minimum
+          ) {
+            errors.push(`事件 ${event.id} 的屍體金錢區間不合法`);
+          }
+          if (
+            !Array.isArray(outcome.eliteChances)
+            || outcome.eliteChances.length !== 3
+            || outcome.eliteChances.some((chance) => (
+              !Number.isFinite(chance) || chance < 0 || chance > 1
+            ))
+          ) {
+            errors.push(`事件 ${event.id} 的屍體菁英遭遇率不合法`);
+          }
         }
         if (
           outcome.type === 'collector-challenge'

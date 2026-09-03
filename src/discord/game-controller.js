@@ -11,6 +11,7 @@ import {
   abandonGame,
   activateSkill,
   chooseEventSkill,
+  chooseEventWeapon,
   chooseReward,
   chooseEventOption,
   chooseVaultReward,
@@ -20,10 +21,12 @@ import {
   createGame,
   endPlayerTurn,
   isStunned,
+  leaveAdventurerCorpse,
   leaveShop,
   placeBet,
   purchaseShopItem,
   purchaseShopSkill,
+  searchAdventurerCorpse,
   spinCollectorEvent,
   upgradeGameState,
   useItem,
@@ -304,6 +307,12 @@ async function withGameLock({ busyGames, gameId }, callback) {
 }
 
 function nextStateForAction(state, { action, value }, rngs) {
+  if (action === 'wager-all-in') {
+    return placeBet(state, state.resources.action, {
+      rng: rngs.effectRng,
+      rewardRng: rngs.rewardRng,
+    });
+  }
   if (action === 'skill') {
     return activateSkill(state, value, {
       rng: rngs.effectRng,
@@ -347,6 +356,20 @@ function nextStateForAction(state, { action, value }, rngs) {
     return chooseEventSkill(state, value, {
       eventRng: rngs.eventRng,
     });
+  }
+  if (action === 'event-weapon') {
+    return chooseEventWeapon(state, value, {
+      eventRng: rngs.eventRng,
+    });
+  }
+  if (action === 'event-corpse-search') {
+    return searchAdventurerCorpse(state, {
+      eventRng: rngs.eventRng,
+      monsterRng: rngs.monsterRng,
+    });
+  }
+  if (action === 'event-corpse-leave') {
+    return leaveAdventurerCorpse(state);
   }
   if (action === 'event-vault-reward') {
     return chooseVaultReward(state, value);

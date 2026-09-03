@@ -68,7 +68,19 @@ test('拉霸公式只放大S與攻擊力，所有額外傷害逐筆獨立結算'
   assert.equal(progressive.lastImpact.additionalDamage, 1);
   progressive = placeBet(progressive, 1, { reels: [DEFENSE, DEFENSE, DEFENSE] });
   assert.equal(progressive.lastImpact.additionalDamage, 2);
+  assert.equal(
+    progressive.player.activeStatuses.find(
+      (status) => status.statusId === 'shuriken-combo',
+    )?.stacks,
+    2,
+  );
   progressive = endPlayerTurn(progressive, { monsterRng: zero });
+  assert.equal(
+    progressive.player.activeStatuses.some(
+      (status) => status.statusId === 'shuriken-combo',
+    ),
+    false,
+  );
   progressive = placeBet(progressive, 1, { reels: [DEFENSE, DEFENSE, DEFENSE] });
   assert.equal(progressive.lastImpact.additionalDamage, 1);
 

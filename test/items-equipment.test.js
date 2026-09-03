@@ -40,7 +40,7 @@ function battle(itemIds = [], {
 }
 
 test('新增道具完整收錄，且多件裝備會同時持有與生效', () => {
-  assert.equal(Object.keys(ITEMS).length, 38);
+  assert.equal(Object.keys(ITEMS).length, 44);
 
   const state = battle(['sword', 'iron-shield', 'vip-membership']);
   assert.deepEqual(state.player.equipment, [
@@ -76,6 +76,92 @@ test('手裡劍額外傷害不受賭徒左手倍率影響', () => {
   assert.equal(state.lastImpact.attackDamage, 9);
   assert.equal(state.lastImpact.damageMultiplier, 2);
   assert.equal(state.enemy.hp, 491);
+  assert.deepEqual(
+    state.player.activeStatuses.find((status) => status.statusId === 'shuriken-combo'),
+    {
+      statusId: 'shuriken-combo',
+      sourceUnitId: state.player.id ?? null,
+      remainingTurns: 1,
+      stacks: 1,
+      potency: 1,
+    },
+  );
+});
+
+test('長劍與強化版在戰鬥開始時分別獲得攻擊力＋1與＋5', () => {
+  const longsword = battle(['sword']);
+  const reinforced = battle(['reinforced-longsword']);
+
+  assert.equal(
+    longsword.player.activeStatuses.find((status) => status.statusId === 'attack-up')
+      ?.potency,
+    1,
+  );
+  assert.equal(
+    reinforced.player.activeStatuses.find(
+      (status) => status.statusId === 'weapon-attack-up-5',
+    )?.remainingTurns,
+    3,
+  );
+  const attacked = placeBet(reinforced, 1, { reels: [ATTACK, DEFENSE, SKILL] });
+  assert.equal(attacked.lastImpact.spinDamage, 6);
+});
+
+test('強化手裡劍每次拉霸累積2點額外傷害', () => {
+  let state = battle(['reinforced-shuriken']);
+  state = placeBet(state, 1, { reels: [DEFENSE, DEFENSE, DEFENSE] });
+  assert.equal(state.lastImpact.additionalDamage, 2);
+  state = placeBet(state, 1, { reels: [DEFENSE, DEFENSE, DEFENSE] });
+  assert.equal(state.lastImpact.additionalDamage, 4);
+  assert.equal(
+    state.player.activeStatuses.find((status) => status.statusId === 'shuriken-combo')
+      ?.stacks,
+    4,
+  );
+});
+
+test('騎士錘依投入點數附加裝甲破壞，強化版在無護甲時追加傷害', () => {
+  let normal = battle(['knight-hammer']);
+  normal.enemy.armor = 5;
+  normal = placeBet(normal, 2, { reels: [ATTACK, DEFENSE, SKILL] });
+  assert.equal(normal.enemy.armor, 3);
+  assert.equal(normal.lastImpact.spinDamage, 0);
+  assert.equal(
+    normal.enemy.activeStatuses.find((status) => status.statusId === 'armor-break')
+      ?.stacks,
+    2,
+  );
+  normal = placeBet(normal, 1, { reels: [DEFENSE, DEFENSE, DEFENSE] });
+  assert.equal(normal.enemy.armor, 3);
+  normal = placeBet(normal, 1, { reels: [ATTACK, DEFENSE, SKILL] });
+  assert.equal(normal.lastImpact.enemyArmorBroken, 2);
+  assert.equal(normal.enemy.armor, 0);
+
+  let reinforced = battle(['reinforced-knight-hammer']);
+  reinforced = placeBet(reinforced, 3, { reels: [ATTACK, DEFENSE, SKILL] });
+  assert.equal(reinforced.lastImpact.spinDamage, 3);
+  assert.equal(reinforced.lastImpact.additionalDamage, 3);
+  assert.equal(
+    reinforced.enemy.activeStatuses.find((status) => status.statusId === 'armor-break')
+      ?.stacks,
+    3,
+  );
+});
+
+test('十字弓的三枚攻擊會保留並無視敵方護甲，強化版造成雙倍傷害', () => {
+  let normal = battle(['crossbow']);
+  normal.enemy.armor = 20;
+  normal = placeBet(normal, 1, { reels: [ATTACK, ATTACK, ATTACK] });
+  assert.equal(normal.lastImpact.spinDamage, 9);
+  assert.equal(normal.enemy.armor, 20);
+  assert.equal(normal.lastImpact.ignoredEnemyArmor, 20);
+
+  let reinforced = battle(['reinforced-crossbow']);
+  reinforced.enemy.armor = 20;
+  reinforced = placeBet(reinforced, 1, { reels: [ATTACK, ATTACK, ATTACK] });
+  assert.equal(reinforced.lastImpact.spinDamage, 18);
+  assert.equal(reinforced.lastImpact.damageMultiplier, 2);
+  assert.equal(reinforced.enemy.armor, 20);
 });
 
 test('符文魔方與星星法杖每次拉霸最多各觸發一次', () => {

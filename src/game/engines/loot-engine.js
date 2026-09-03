@@ -189,7 +189,7 @@ function rewardPool(rarity, regionTags, player, contentTypes = ['skill', 'equipm
     .filter((item) => (
       allowed.has(item.type)
       && eligible(item, rarity, regionTags)
-      && !ownedItems.has(item.id)
+      && !ownsItemOrWeaponFamily(ownedItems, item)
     ))
     .map((item) => ({
       contentType: 'item',
@@ -205,8 +205,14 @@ function shopItemPool(rarity, regionTags, player) {
   const ownedEquipment = new Set(Object.values(player.equipment ?? {}));
   return Object.values(ITEMS).filter((item) => (
     eligible(item, rarity, regionTags)
-    && (item.type !== 'equipment' || !ownedEquipment.has(item.id))
+    && (item.type !== 'equipment' || !ownsItemOrWeaponFamily(ownedEquipment, item))
   ));
+}
+
+function ownsItemOrWeaponFamily(ownedIds, item) {
+  return ownedIds.has(item.id)
+    || Boolean(item.weaponUpgradeId && ownedIds.has(item.weaponUpgradeId))
+    || Boolean(item.weaponBaseId && ownedIds.has(item.weaponBaseId));
 }
 
 function probabilityRoll(rng) {

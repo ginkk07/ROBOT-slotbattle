@@ -56,6 +56,7 @@ import {
   reduceDamageBySource,
   reduceIncomingDamageWithEquipment,
   resourceGainAmount,
+  spinAttackArmorBreakRequests,
   spinDamageModifiers,
   treatsSymbolAsLucky,
   turnResourceRetentionRatio,
@@ -245,6 +246,7 @@ export function placeBet(
   const damageModifiers = spinDamageModifiers(next.player, {
     wager,
     actionLimit: playerActionLimit(next),
+    reels: outcome.reels,
   });
   const afterSpin = afterSpinEquipmentBonuses(next.player, {
     reels: outcome.reels,
@@ -258,17 +260,30 @@ export function placeBet(
       * damageModifiers.multiplier,
     )
     : 0;
+  const enemyArmorBroken = requestedAttack > 0 && !damageModifiers.ignoreArmor
+    ? removeArmorBeforeUnitTakesDamage(next.enemy)
+    : 0;
   const attackEvent = dealDamageToEnemy(
     next,
     requestedAttack,
     'physical',
     DamageSource.SPIN,
-    { deferFollowUps: true },
+    {
+      deferFollowUps: true,
+      ignoreArmor: damageModifiers.ignoreArmor,
+    },
   );
+  if (attackEvent) attackEvent.armorBroken = enemyArmorBroken;
   const spinDamage = attackEvent?.amount ?? 0;
 
   // 額外傷害逐筆獨立結算，不進入強擊或賭徒左手倍率。
   const extraDamageEvents = [];
+  const hammerResult = resolveSpinAttackArmorBreakEquipment(next, {
+    wager,
+    reels: outcome.reels,
+    attackSucceeded: requestedAttack > 0,
+  });
+  extraDamageEvents.push(...hammerResult.damageEvents);
   if (spinDamage > 0 && statusBonuses.additionalDamage > 0) {
     const damageEvent = dealDamageToEnemy(
       next,
@@ -421,6 +436,13 @@ export function placeBet(
       .reduce((sum, event) => sum + event.amount, 0) + flameSword.damage,
     statusBonus: statusBonuses.attackPower + statusBonuses.additionalDamage,
     damageMultiplier: multiplierResult.multiplier * damageModifiers.multiplier,
+    ...(enemyArmorBroken > 0 ? { enemyArmorBroken } : {}),
+    ...((attackEvent?.armorUsed ?? 0) > 0
+      ? { enemyArmorUsed: attackEvent.armorUsed }
+      : {}),
+    ...((attackEvent?.ignoredArmor ?? 0) > 0
+      ? { ignoredEnemyArmor: attackEvent.ignoredArmor }
+      : {}),
   };
   next.lastAction = {
     type: outcome.stunned && next.stunned ? 'stunned' : 'spin',
@@ -432,6 +454,7 @@ export function placeBet(
   };
   next.history.at(-1).equipmentEvents = [
     ...afterSpin.events,
+    ...hammerResult.events,
     ...extraDamageEvents.filter((event) => event.itemId),
     ...flameSword.events,
     ...postSpinEquipmentEvents,
@@ -721,7 +744,6 @@ export function endPlayerTurn(
     next.phase = GamePhase.PLAYER_TURN;
     next.combatModifiers.damageDealtThisTurn = 0;
     next.combatModifiers.damageDealtBySource = createDamageSourceTotals();
-    next.combatModifiers.progressiveSpinExtraDamage = {};
     next.combatModifiers.usedTurnEquipmentEffects = {};
     next.resources.action = playerActionLimit(next);
     playerTurnStartStatus = resolveTriggeredStatuses(
@@ -858,7 +880,12 @@ export function chooseEventOption(
   if (next.player.gold < goldCost) {
     throw new RangeError(`金錢不足，目前需要 🪙${goldCost}`);
   }
+  const itemCost = resolved.option.itemCost ?? null;
+  if (itemCost && inventoryItemQuantity(next.player, itemCost.itemId) < itemCost.quantity) {
+    throw new RangeError(`缺少${getItem(itemCost.itemId).name}，無法選擇這個選項`);
+  }
   next.player.gold -= goldCost;
+  if (itemCost) consumeInventoryItem(next.player, itemCost.itemId, itemCost.quantity);
   next.history.push({
     type: 'event-option-selected',
     eventId: next.event.eventId,
@@ -866,6 +893,7 @@ export function chooseEventOption(
     outcomeId: outcome.id,
     outcomeType: outcome.type,
     goldCost,
+    ...(itemCost ? { itemCost: structuredClone(itemCost) } : {}),
   });
 
   if (outcome.type === 'full-heal') {
@@ -891,6 +919,13 @@ export function chooseEventOption(
     return next;
   } else if (outcome.type === 'reduce-max-hp-upgrade-skill') {
     beginAncientEchoUpgrade(next, outcome);
+    return next;
+  } else if (outcome.type === 'begin-weapon-upgrade') {
+    beginWeaponUpgrade(next, outcome);
+    return next;
+  } else if (outcome.type === 'search-adventurer-corpse') {
+    beginAdventurerCorpseSearch(next, outcome);
+    resolveAdventurerCorpseSearch(next, { eventRng, monsterRng });
     return next;
   } else if (outcome.type === 'collector-challenge') {
     beginCollectorChallenge(next, outcome, eventRng);
@@ -997,6 +1032,89 @@ export function chooseEventSkill(
     rewardId: next.event.collector.rewardId,
   });
   resolveCollectorSpin(next, null, eventRng);
+  return next;
+}
+
+/** 處理尋寶鐵匠的普通武器強化選擇與成功判定。 */
+export function chooseEventWeapon(
+  state,
+  itemId,
+  { eventRng = Math.random } = {},
+) {
+  const next = upgradeGameState(state);
+  assertEventStage(next, ['weapon-upgrade-choice']);
+  if (!next.event.weaponChoices?.includes(itemId)) {
+    throw new RangeError('這件武器不在目前的強化選項中');
+  }
+
+  const baseItem = getItem(itemId);
+  const upgradedItem = getItem(baseItem.weaponUpgradeId);
+  const successChance = Number(next.event.pendingOutcome?.successChance ?? 0);
+  const succeeded = successChance >= 1 || probabilityRoll(eventRng) < successChance;
+  if (!succeeded) {
+    next.history.push({
+      type: 'event-weapon-upgrade-failed',
+      eventId: next.event.eventId,
+      itemId: baseItem.id,
+      successChance,
+    });
+    setEventResult(
+      next,
+      next.event.pendingOutcome,
+      [
+        '鐵匠嘗試加工武器，但在最後關頭，強化用的材料突然碎裂。',
+        '「武器沒有損壞，但這次沒能成功。抱歉，已經用掉的材料也拿不回來了。」',
+        `強化失敗，「${baseItem.name}」保持不變。`,
+      ].join('\n'),
+    );
+    return next;
+  }
+
+  next.player.equipment = [...new Set(
+    next.player.equipment.map((equippedId) => (
+      equippedId === baseItem.id ? upgradedItem.id : equippedId
+    )),
+  )];
+  next.history.push({
+    type: 'event-weapon-upgraded',
+    eventId: next.event.eventId,
+    oldItemId: baseItem.id,
+    newItemId: upgradedItem.id,
+    successChance,
+  });
+  setEventResult(
+    next,
+    next.event.pendingOutcome,
+    [
+      '鐵匠接過武器，利用遺跡中找到的材料仔細加工。',
+      '一陣清脆的敲擊聲後，武器展現出了截然不同的力量。',
+      '「完成了。它現在可比原本好用多了。」',
+      `強化成功！「${baseItem.name}」已變為「${upgradedItem.name}」。`,
+    ].join('\n'),
+  );
+  return next;
+}
+
+/** 繼續搜刮冒險者屍體；每次先判定菁英遭遇，安全時才取得戰利品。 */
+export function searchAdventurerCorpse(
+  state,
+  { eventRng = Math.random, monsterRng = Math.random } = {},
+) {
+  const next = upgradeGameState(state);
+  assertEventStage(next, ['corpse-search']);
+  resolveAdventurerCorpseSearch(next, { eventRng, monsterRng });
+  return next;
+}
+
+/** 保留目前已搜刮的內容並離開屍體事件。 */
+export function leaveAdventurerCorpse(state) {
+  const next = upgradeGameState(state);
+  assertEventStage(next, ['corpse-search']);
+  setEventResult(
+    next,
+    next.event.pendingOutcome,
+    '你決定不再冒險，帶著目前找到的財物離開屍體。\n\n身後依然一片寂靜，但你總覺得有什麼東西正在暗處注視著你。',
+  );
   return next;
 }
 
@@ -1218,6 +1336,194 @@ function beginAncientEchoUpgrade(state, outcome) {
   state.event.prompt = `${outcome.text}\n你的最大生命降低 ${state.event.maxHpReduced} 點。請選擇一項尚未滿級的技能。`;
 }
 
+function beginWeaponUpgrade(state, outcome) {
+  state.event.pendingOutcome = structuredClone(outcome);
+  state.event.weaponChoices = upgradableWeaponIds(state.player);
+  if (state.event.weaponChoices.length === 0) {
+    setEventResult(
+      state,
+      outcome,
+      `${outcome.text}\n鐵匠檢視後搖了搖頭；你目前沒有可以重鑄的普通武器。`,
+    );
+    return;
+  }
+  state.event.stage = 'weapon-upgrade-choice';
+  state.event.prompt = `${outcome.text}\n請選擇一件普通武器進行強化。`;
+}
+
+function beginAdventurerCorpseSearch(state, outcome) {
+  state.event.pendingOutcome = structuredClone(outcome);
+  state.event.corpse = {
+    attempts: 0,
+    weaponFound: false,
+    rewards: [],
+  };
+  state.event.stage = 'corpse-search';
+}
+
+function resolveAdventurerCorpseSearch(state, { eventRng, monsterRng }) {
+  const corpse = state.event.corpse;
+  const outcome = state.event.pendingOutcome;
+  if (!corpse || !outcome) throw new Error('冒險者屍體缺少搜刮資料');
+  if (corpse.attempts >= outcome.eliteChances.length) {
+    throw new Error('這具冒險者屍體已經搜刮完畢');
+  }
+
+  corpse.attempts += 1;
+  const attempt = corpse.attempts;
+  const chance = Number(outcome.eliteChances[attempt - 1]);
+  const searchIntro = corpseSearchIntroText(attempt, chance);
+
+  // 抽中菁英時，該次搜刮不會再取得戰利品；先前收穫保留在玩家身上。
+  if (probabilityRoll(eventRng) < chance) {
+    state.history.push({
+      type: 'event-corpse-elite-encountered',
+      eventId: state.event.eventId,
+      attempt,
+      eliteChance: chance,
+    });
+    const combatText = [
+      searchIntro,
+      '',
+      '就在你搜刮屍體時，附近突然傳來一陣低沉的聲響。',
+      '一道危險的身影從暗處現身。直到這時你才明白，這名冒險者的死因從未真正離開。',
+      '**但你只能進行戰鬥！**',
+    ].join('\n');
+    startEventCombat(state, {
+      id: 'corpse-elite-ambush',
+      type: 'start-combat',
+      rank: 'elite',
+      text: combatText,
+    }, { rng: eventRng, monsterRng });
+    return;
+  }
+
+  const reward = drawCorpseSearchReward(state, outcome, {
+    allowWeapon: !corpse.weaponFound,
+    rng: eventRng,
+  });
+  applyCorpseSearchReward(state, reward);
+  if (reward.type === 'weapon') corpse.weaponFound = true;
+  corpse.rewards.push(structuredClone(reward));
+  const searchText = `${searchIntro}\n\n${corpseRewardText(reward)}`;
+  state.history.push({
+    type: 'event-corpse-searched',
+    eventId: state.event.eventId,
+    attempt,
+    reward: structuredClone(reward),
+    eliteChance: chance,
+  });
+
+  if (attempt >= outcome.eliteChances.length) {
+    setEventResult(
+      state,
+      outcome,
+      [
+        searchText,
+        '',
+        '你已經把能找到的財物全數收起。',
+        '遠處的聲音正逐漸接近，繼續留在這裡不會是個好主意。',
+        '**搜刮結束，你離開了現場。**',
+      ].join('\n'),
+    );
+    return;
+  }
+
+  state.event.stage = 'corpse-search';
+  state.event.prompt = searchText;
+}
+
+function drawCorpseSearchReward(state, outcome, { allowWeapon, rng }) {
+  const regionTags = getRegion(state.adventure.regionId).tags;
+  const consumables = Object.values(ITEMS).filter((item) => (
+    item.type === 'consumable'
+    && item.rarity === ContentRarity.COMMON
+    && item.lootEligible
+    && regionTags.every((tag) => item.lootTags?.includes(tag))
+  ));
+  const ownedEquipment = new Set(equippedItemIds(state.player));
+  const weapons = Object.values(ITEMS).filter((item) => (
+    allowWeapon
+    && item.type === 'equipment'
+    && item.rarity === ContentRarity.COMMON
+    && Boolean(item.weaponUpgradeId)
+    && item.lootEligible
+    && regionTags.every((tag) => item.lootTags?.includes(tag))
+    && !ownedEquipment.has(item.id)
+    && !ownedEquipment.has(item.weaponUpgradeId)
+  ));
+  const categories = [
+    ...(consumables.length > 0 ? [{ type: 'consumable', weight: outcome.lootWeights.consumable }] : []),
+    ...(weapons.length > 0 ? [{ type: 'weapon', weight: outcome.lootWeights.weapon }] : []),
+    { type: 'gold', weight: outcome.lootWeights.gold },
+  ];
+  const category = pickWeighted(categories, rng);
+
+  if (category.type === 'gold') {
+    return {
+      type: 'gold',
+      amount: randomInteger(outcome.gold.minimum, outcome.gold.maximum, rng),
+    };
+  }
+
+  const item = pickWeighted(
+    category.type === 'weapon' ? weapons : consumables,
+    rng,
+    (candidate) => candidate.lootWeight,
+  );
+  return { type: category.type, itemId: item.id };
+}
+
+function applyCorpseSearchReward(state, reward) {
+  if (reward.type === 'gold') {
+    state.player.gold += reward.amount;
+    return;
+  }
+  applyReward(state.player, {
+    contentType: 'item',
+    contentId: reward.itemId,
+    acquisition: 'acquire',
+    rarity: ContentRarity.COMMON,
+  });
+}
+
+function corpseSearchIntroText(attempt, chance) {
+  const heading = {
+    1: '你小心翻找冒險者的行囊，留意著周圍的動靜。',
+    2: '屍體身上或許還藏著其他東西，但你翻找造成的聲響已經開始傳向四周。\n附近似乎有什麼東西注意到了這裡。',
+    3: '你決定進行最後一次搜索。\n周圍安靜得異常，遠處不時傳來沉重的腳步聲。無論找到什麼，這次之後都必須離開。',
+  }[attempt];
+  const limitText = attempt === 2
+    ? '**剩餘搜刮次數：1次**'
+    : attempt === 3 ? '**這是最後一次搜刮。**' : null;
+  return [
+    heading,
+    '',
+    `**遭遇魔物的機率：${Math.round(chance * 100)}%**`,
+    limitText,
+  ].filter(Boolean).join('\n');
+}
+
+function corpseRewardText(reward) {
+  if (reward.type === 'gold') {
+    return [
+      '你找到了一只沉甸甸的錢袋。清點之後，裡面還留著不少金幣。',
+      `**獲得 ${reward.amount} 枚金幣。**`,
+    ].join('\n');
+  }
+  const item = getItem(reward.itemId);
+  if (reward.type === 'weapon') {
+    return [
+      '屍體身旁壓著一件仍可使用的武器。雖然上面留下了戰鬥的痕跡，但並沒有損壞。',
+      `**獲得裝備：${item.emoji}${item.name}**`,
+    ].join('\n');
+  }
+  return [
+    '你從行囊深處找到一件尚未使用的物品。',
+    `**獲得消耗品：${item.emoji}${item.name}**`,
+  ].join('\n');
+}
+
 function beginCollectorChallenge(state, outcome, rng) {
   const reward = drawCollectorReward(state, outcome.rewardType, rng);
   if (!reward || (state.player.skillIds?.length ?? 0) === 0) {
@@ -1272,6 +1578,13 @@ function upgradableSkillIds(player) {
   return (player.skillIds ?? []).filter((skillId) => (
     playerSkillLevel(player, skillId) < skillMaximum(skillId)
   ));
+}
+
+function upgradableWeaponIds(player) {
+  return equippedItemIds(player).filter((itemId) => {
+    const item = getItem(itemId);
+    return item.rarity === ContentRarity.COMMON && Boolean(item.weaponUpgradeId);
+  });
 }
 
 function payShopPrice(state, price) {
@@ -1439,9 +1752,11 @@ function setEventResult(state, outcome, text) {
   state.event.stage = 'result';
   state.event.prompt = null;
   state.event.skillChoices = [];
+  state.event.weaponChoices = [];
   state.event.pendingOutcome = null;
   state.event.shop = null;
   state.event.vault = null;
+  state.event.corpse = null;
   state.event.result = {
     outcomeId: outcome.id,
     type: outcome.type,
@@ -1534,6 +1849,7 @@ function startNextNode(state, {
     node = drawNextAdventureNode(state.adventure, {
       rng: worldRng,
       minimumEliteChance: minimumEliteEncounterChance(state.player),
+      player: state.player,
     });
   }
 
@@ -1545,10 +1861,11 @@ function startNextNode(state, {
       description: node.event.description,
       rarity: node.rarity,
       stage: 'choice',
-      options: node.event.options.map(({ id, label, goldCost }) => ({
+      options: node.event.options.map(({ id, label, goldCost, itemCost }) => ({
         id,
         label,
         ...(goldCost !== undefined ? { goldCost } : {}),
+        ...(itemCost !== undefined ? { itemCost: structuredClone(itemCost) } : {}),
       })),
       result: null,
     };
@@ -1773,6 +2090,29 @@ function applyReward(player, choice) {
   const stack = player.inventory.find((entry) => entry.itemId === item.id);
   if (stack) stack.quantity += 1;
   else player.inventory.push({ itemId: item.id, quantity: 1 });
+}
+
+function inventoryItemQuantity(player, itemId) {
+  return Number(
+    player.inventory?.find((entry) => entry.itemId === itemId)?.quantity ?? 0,
+  );
+}
+
+function probabilityRoll(rng) {
+  const roll = rng();
+  if (!Number.isFinite(roll) || roll < 0 || roll >= 1) {
+    throw new RangeError('rng 必須回傳0（含）到1（不含）的數字');
+  }
+  return roll;
+}
+
+function consumeInventoryItem(player, itemId, quantity) {
+  const stack = player.inventory.find((entry) => entry.itemId === itemId);
+  if (!stack || stack.quantity < quantity) {
+    throw new RangeError(`缺少${getItem(itemId).name}，無法支付事件需求`);
+  }
+  stack.quantity -= quantity;
+  player.inventory = player.inventory.filter((entry) => entry.quantity > 0);
 }
 
 function queueNextBattleStatus(state, outcome) {
@@ -2092,13 +2432,20 @@ function dealDamageToEnemy(
   amount,
   element,
   damageSource,
-  { deferFollowUps = false } = {},
+  { deferFollowUps = false, ignoreArmor = false } = {},
 ) {
   if (!Number.isFinite(amount) || amount <= 0 || state.enemy?.hp <= 0) return null;
   const requested = damageSource === DamageSource.EXTRA
     ? extraDamageAmount(state.player, amount)
     : amount;
-  const event = applyDirectDamage(state, 'enemy', requested, element, damageSource);
+  const event = applyDirectDamage(
+    state,
+    'enemy',
+    requested,
+    element,
+    damageSource,
+    { ignoreArmor },
+  );
   if (!event || event.amount <= 0) return event;
   if (deferFollowUps) {
     event.followUpEvents = [];
@@ -2128,7 +2475,14 @@ function dealDamageToEnemy(
  * - 反射先套用對應的來源減傷，再由護甲吸收；無視抗性與一般減傷。
  * - 其餘傷害走既有元素抗性與狀態減傷。
  */
-function applyDirectDamage(state, targetKey, requested, element, damageSource) {
+function applyDirectDamage(
+  state,
+  targetKey,
+  requested,
+  element,
+  damageSource,
+  { ignoreArmor = false } = {},
+) {
   const unit = state[targetKey];
   if (!unit || unit.hp <= 0 || requested <= 0) return null;
   const usesSourceSpecificReduction = [
@@ -2140,6 +2494,7 @@ function applyDirectDamage(state, targetKey, requested, element, damageSource) {
     : requested;
   const sourceDamageReduction = Math.max(0, requested - sourceReducedAmount);
   let armorUsed = 0;
+  let ignoredArmor = 0;
   let resolved;
 
   if (damageSource === DamageSource.CURSE) {
@@ -2156,6 +2511,18 @@ function applyDirectDamage(state, targetKey, requested, element, damageSource) {
     };
   } else {
     resolved = damageAfterMitigation(requested, unit, element);
+    if (targetKey === 'enemy' && damageSource === DamageSource.SPIN) {
+      if (ignoreArmor) {
+        ignoredArmor = Math.max(0, Number(unit.armor ?? 0));
+      } else {
+        armorUsed = Math.min(
+          Math.max(0, Number(unit.armor ?? 0)),
+          resolved.amount,
+        );
+        unit.armor = Math.max(0, Number(unit.armor ?? 0) - armorUsed);
+        resolved.amount = Math.max(0, resolved.amount - armorUsed);
+      }
+    }
   }
   const amount = Math.min(unit.hp, resolved.amount);
   unit.hp -= amount;
@@ -2170,6 +2537,7 @@ function applyDirectDamage(state, targetKey, requested, element, damageSource) {
     target: targetKey === 'enemy' ? 'enemy' : 'self',
     sourceDamageReduction,
     armorUsed,
+    ignoredArmor,
   };
   recordDamageEvents(state, [event]);
   return event;
@@ -2255,7 +2623,24 @@ function activeStatusValue(unit, statusId) {
 }
 
 function removeArmorBeforeIncomingDamage(state) {
-  const requested = (state.player.activeStatuses ?? []).reduce((total, active) => {
+  const requested = armorBreakAmount(state.player);
+  const amount = Math.min(state.resources.armor, Math.max(0, requested));
+  state.resources.armor -= amount;
+  return amount;
+}
+
+function removeArmorBeforeUnitTakesDamage(unit) {
+  if (!unit) return 0;
+  const amount = Math.min(
+    Math.max(0, Number(unit.armor ?? 0)),
+    Math.max(0, armorBreakAmount(unit)),
+  );
+  unit.armor = Math.max(0, Number(unit.armor ?? 0) - amount);
+  return amount;
+}
+
+function armorBreakAmount(unit) {
+  return (unit?.activeStatuses ?? []).reduce((total, active) => {
     const definition = getStatus(active.statusId);
     if (definition.effect.type !== StatusEffectType.REMOVE_ARMOR_BEFORE_DAMAGE) {
       return total;
@@ -2266,9 +2651,52 @@ function removeArmorBeforeIncomingDamage(state) {
       * Number(active.potency ?? 1)
     );
   }, 0);
-  const amount = Math.min(state.resources.armor, Math.max(0, requested));
-  state.resources.armor -= amount;
-  return amount;
+}
+
+function resolveSpinAttackArmorBreakEquipment(
+  state,
+  { wager, reels, attackSucceeded },
+) {
+  const events = [];
+  const damageEvents = [];
+  if (!attackSucceeded || state.enemy?.hp <= 0) return { events, damageEvents };
+
+  for (const request of spinAttackArmorBreakRequests(state.player, { wager, reels })) {
+    const unarmored = Number(state.enemy.armor ?? 0) <= 0;
+    state.enemy.activeStatuses = mergeActiveStatus(
+      state.enemy.activeStatuses,
+      {
+        statusId: request.statusId,
+        sourceUnitId: state.player.unitId ?? null,
+        remainingTurns: null,
+        stacks: request.stacks,
+        potency: 1,
+      },
+    );
+    events.push({
+      type: 'apply-status',
+      itemId: request.itemId,
+      statusId: request.statusId,
+      target: 'enemy',
+      applied: true,
+      stacks: request.stacks,
+      potency: 1,
+    });
+
+    if (!request.bonusDamageWhenUnarmored || !unarmored) continue;
+    const damageEvent = dealDamageToEnemy(
+      state,
+      request.stacks,
+      request.element,
+      DamageSource.EXTRA,
+      { deferFollowUps: true },
+    );
+    if (damageEvent) {
+      damageEvents.push({ ...damageEvent, itemId: request.itemId });
+    }
+  }
+
+  return { events, damageEvents };
 }
 
 function resolveAfterSpinDamageEquipment(
@@ -2482,7 +2910,6 @@ function createCombatModifiers() {
     damageDealtThisTurn: 0,
     // 依四大傷害分類記錄本回合實際傷害。
     damageDealtBySource: createDamageSourceTotals(),
-    progressiveSpinExtraDamage: {},
     usedTurnEquipmentEffects: {},
     usedOnceEquipmentEffects: {},
     // 神秘泉水等奇遇可封印下一場戰鬥的技能；戰鬥結束後隨重置清除。
@@ -2704,6 +3131,7 @@ function applyEnemyOverrides(enemy, overrides) {
   if (overrides.baseDamage !== undefined) {
     enemy.baseDamage = Number(overrides.baseDamage);
   }
+  if (overrides.armor !== undefined) enemy.armor = Math.max(0, Number(overrides.armor));
   if (overrides.damageResistances) {
     enemy.damageResistances = structuredClone(overrides.damageResistances);
   }
@@ -2743,13 +3171,15 @@ function ensureCurrentFields(state) {
   if (state.event) {
     const definition = getEvent(state.event.eventId);
     state.event.stage ??= 'choice';
-    state.event.options ??= definition.options.map(({ id, label, goldCost }) => ({
+    state.event.options ??= definition.options.map(({ id, label, goldCost, itemCost }) => ({
       id,
       label,
       ...(goldCost !== undefined ? { goldCost } : {}),
+      ...(itemCost !== undefined ? { itemCost: structuredClone(itemCost) } : {}),
     }));
     state.event.result ??= null;
     state.event.skillChoices ??= [];
+    state.event.weaponChoices ??= [];
     if (state.event.stage === 'shop') {
       state.event.shop ??= { purchases: 0, totalSpent: 0, items: [] };
       state.event.shop.purchases ??= 0;
@@ -2758,6 +3188,7 @@ function ensureCurrentFields(state) {
     }
   }
   if (state.enemy) {
+    state.enemy.armor = Math.max(0, Number(state.enemy.armor ?? 0));
     state.enemy.activeStatuses ??= [];
     state.enemy.intent ??= {
       type: 'basic-attack',
@@ -2892,7 +3323,7 @@ function upgradeLegacyState(legacy) {
 }
 
 /**
- * v4以前的「燃焰之劍」其實是現在的普通「劍」。升級存檔時改成新 ID，
+ * v4以前的「燃焰之劍」其實是現在的普通「長劍」。升級存檔時改成新 ID，
  * 避免舊玩家因同名道具改版而直接取得新的傳說效果。
  */
 function migratePreItemExpansionState(state) {

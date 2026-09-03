@@ -9,7 +9,11 @@ import {
   skillDescription,
   skillUsageLabel,
 } from '../game/data/skills.js';
-import { getStatus } from '../game/data/statuses.js';
+import {
+  StatusEffectType,
+  StatusTrigger,
+  getStatus,
+} from '../game/data/statuses.js';
 import {
   GamePhase,
   GameStatus,
@@ -112,7 +116,7 @@ export function renderRules() {
     description: [
       '每回合開始時會獲得行動點。',
       '',
-      '按下「投入點數」後，輸入本次想投入的數量。你可以一次投入，也可以拆成多次拉霸。',
+      '按下「投入點數」可自行輸入數量；按下「ALL IN」則會直接投入目前剩餘的全部行動點。你可以一次投入，也可以拆成多次拉霸。',
       '',
       '牌面會出現 ⚔️｜🛡️｜✨｜🍀｜💀。相同圖案越多、投入點數越多，產生的效果就越強。',
       '',
@@ -152,8 +156,9 @@ export function renderWagerModal(state) {
 }
 
 function renderCombat(state) {
+  const enemyArmor = Math.max(0, Number(state.enemy.armor ?? 0));
   const enemyField = {
-    name: `👹 ${rankLabel(state.enemy.rank)}${state.enemy.name} HP　${state.enemy.hp}/${state.enemy.maxHp}`,
+    name: `👹 ${rankLabel(state.enemy.rank)}${state.enemy.name} HP　${state.enemy.hp}/${state.enemy.maxHp}${enemyArmor > 0 ? `　🛡️ ${enemyArmor}` : ''}`,
     value: [
       healthBar(state.enemy.hp, state.enemy.maxHp, '🟥'),
       '**敵人狀態**',
@@ -295,7 +300,7 @@ function eventControls(state) {
         customId: gameCustomId(state.id, 'event-option', option.id),
         label: option.label,
         style: BUTTON_STYLE.PRIMARY,
-        disabled: Number(option.goldCost ?? 0) > state.player.gold,
+        disabled: eventOptionUnavailable(state, option),
       }))),
       actionRow([abandonButton(state.id)]),
     ];
@@ -335,6 +340,40 @@ function eventControls(state) {
         label: `${prefix} ${getSkill(skillId).name}`,
         style: BUTTON_STYLE.PRIMARY,
       }))),
+      actionRow([abandonButton(state.id)]),
+    ];
+  }
+
+  if (event.stage === 'weapon-upgrade-choice') {
+    return [
+      actionRow(event.weaponChoices.map((itemId) => {
+        const item = getItem(itemId);
+        const upgraded = getItem(item.weaponUpgradeId);
+        return button({
+          customId: gameCustomId(state.id, 'event-weapon', itemId),
+          label: `${item.name} → ${upgraded.name}`,
+          style: BUTTON_STYLE.SUCCESS,
+        });
+      })),
+      actionRow([abandonButton(state.id)]),
+    ];
+  }
+
+  if (event.stage === 'corpse-search') {
+    const finalSearch = Number(event.corpse?.attempts ?? 0) >= 2;
+    return [
+      actionRow([
+        button({
+          customId: gameCustomId(state.id, 'event-corpse-search'),
+          label: finalSearch ? '進行最後一次搜刮' : '繼續搜刮',
+          style: BUTTON_STYLE.PRIMARY,
+        }),
+        button({
+          customId: gameCustomId(state.id, 'event-corpse-leave'),
+          label: '帶著目前的收穫離開',
+          style: BUTTON_STYLE.SECONDARY,
+        }),
+      ]),
       actionRow([abandonButton(state.id)]),
     ];
   }
@@ -392,6 +431,17 @@ function eventControls(state) {
   throw new RangeError(`尚未支援的奇遇階段：${event.stage}`);
 }
 
+function eventOptionUnavailable(state, option) {
+  if (Number(option.goldCost ?? 0) > state.player.gold) return true;
+  if (!option.itemCost) return false;
+  const quantity = Number(
+    state.player.inventory?.find(
+      (entry) => entry.itemId === option.itemCost.itemId,
+    )?.quantity ?? 0,
+  );
+  return quantity < Number(option.itemCost.quantity ?? 1);
+}
+
 function renderEndSummary(state) {
   const summary = state.endSummary;
   const lost = state.status === GameStatus.LOST;
@@ -445,13 +495,22 @@ function combatControls(state) {
   }
 
   const stunned = isStunned(state);
-  const actionButtons = [button({
-    customId: gameCustomId(state.id, 'wager'),
-    label: `投入點數（剩餘 ${state.resources.action}）`,
-    emoji: '❇️',
-    style: BUTTON_STYLE.PRIMARY,
-    disabled: stunned || state.resources.action < 1,
-  })];
+  const actionButtons = [
+    button({
+      customId: gameCustomId(state.id, 'wager'),
+      label: `投入點數（剩餘 ${state.resources.action}）`,
+      emoji: '❇️',
+      style: BUTTON_STYLE.PRIMARY,
+      disabled: stunned || state.resources.action < 1,
+    }),
+    button({
+      customId: gameCustomId(state.id, 'wager-all-in'),
+      label: 'ALL IN',
+      emoji: '🎰',
+      style: BUTTON_STYLE.DANGER,
+      disabled: stunned || state.resources.action < 1,
+    }),
+  ];
 
   for (const skillId of state.player.skillIds) {
     const skill = getSkill(skillId);
@@ -637,6 +696,15 @@ function statusListText(statuses) {
   if (!statuses?.length) return '無';
   return statuses.map((status) => {
     const definition = getStatus(status.statusId);
+    if (
+      definition.trigger === StatusTrigger.AFTER_SPIN
+      && definition.effect.type === StatusEffectType.BONUS_DAMAGE
+    ) {
+      const amount = Number(definition.effect.amountPerPotency ?? 0)
+        * Number(status.potency ?? 1)
+        * Number(status.stacks ?? 1);
+      return `${definition.emoji}${definition.name}（額外傷害＋${amount}）`;
+    }
     if (definition.durationMode === 'battle') {
       const stackText = Number(status.stacks ?? 1) > 1
         ? `（${status.stacks}層）`

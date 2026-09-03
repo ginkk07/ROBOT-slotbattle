@@ -225,7 +225,9 @@ test('技能按鈕會在原戰鬥訊息顯示詳情卡', async () => {
     {},
   );
   const startBody = await startResponse.json();
-  const detailCustomId = startBody.data.components[0].components[1].custom_id;
+  const detailCustomId = startBody.data.components[0].components.find(
+    (component) => component.custom_id.includes(':detail-skill:'),
+  ).custom_id;
 
   const detailResponse = await worker.fetch(
     interactionRequest(componentInteraction(detailCustomId)),

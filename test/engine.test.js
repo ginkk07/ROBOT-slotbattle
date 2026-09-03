@@ -6,6 +6,7 @@ import {
   abandonGame,
   activateSkill,
   chooseEventSkill,
+  chooseEventWeapon,
   chooseEventOption,
   chooseVaultReward,
   chooseReward,
@@ -17,10 +18,12 @@ import {
   GamePhase,
   GameStatus,
   isStunned,
+  leaveAdventurerCorpse,
   leaveShop,
   placeBet,
   purchaseShopItem,
   purchaseShopSkill,
+  searchAdventurerCorpse,
   spinCollectorEvent,
   upgradeGameState,
   useItem,
@@ -72,10 +75,11 @@ function eventState(eventId, skillIds = ['power-strike']) {
     rarity: event.rarity,
     description: event.description,
     stage: 'choice',
-    options: event.options.map(({ id, label, goldCost }) => ({
+    options: event.options.map(({ id, label, goldCost, itemCost }) => ({
       id,
       label,
       ...(goldCost !== undefined ? { goldCost } : {}),
+      ...(itemCost !== undefined ? { itemCost: structuredClone(itemCost) } : {}),
     })),
     result: null,
   };
@@ -280,7 +284,7 @@ test('消耗品可在戰鬥中使用並從背包扣除', () => {
   assert.deepEqual(state.player.inventory, []);
 });
 
-test('劍在每場戰鬥開始時取得攻擊力狀態並持續3回合', () => {
+test('長劍在每場戰鬥開始時取得攻擊力狀態並持續3回合', () => {
   let state = createGame({
     id: 'equipment-test',
     ownerId: 'player-1',
@@ -744,6 +748,116 @@ test('遠古回響降低20%最大生命並讓玩家選擇一項未滿級技能�
   assert.equal(state.player.skillLevels['power-strike'], 2);
   assert.equal(state.event.stage, 'result');
   assert.match(state.event.result.text, /強擊.*Lv\.2/);
+});
+
+test('尋寶中的鐵匠支付20金幣後有60%機率強化武器', () => {
+  let state = eventState('ruins-treasure-blacksmith');
+  state.player.equipment = ['sword', 'shuriken', 'iron-shield'];
+  state.player.gold = 40;
+
+  state = chooseEventOption(state, 'forge-risky', { eventRng: zero });
+  assert.equal(state.player.gold, 20);
+  assert.equal(state.event.stage, 'weapon-upgrade-choice');
+  assert.deepEqual(state.event.weaponChoices, ['sword', 'shuriken']);
+
+  state = chooseEventWeapon(state, 'sword', { eventRng: () => 0.59 });
+  assert.equal(state.event.stage, 'result');
+  assert.deepEqual(
+    state.player.equipment,
+    ['reinforced-longsword', 'shuriken', 'iron-shield'],
+  );
+  assert.match(state.event.result.text, /長劍.*長劍\(強化\)/);
+});
+
+test('尋寶中的鐵匠強化失敗會消耗金幣但保留原武器', () => {
+  let state = eventState('ruins-treasure-blacksmith');
+  state.player.equipment = ['sword'];
+  state.player.gold = 20;
+
+  state = chooseEventOption(state, 'forge-risky', { eventRng: zero });
+  state = chooseEventWeapon(state, 'sword', { eventRng: () => 0.6 });
+
+  assert.equal(state.player.gold, 0);
+  assert.deepEqual(state.player.equipment, ['sword']);
+  assert.match(state.event.result.text, /強化失敗.*長劍.*保持不變/);
+});
+
+test('尋寶中的鐵匠收取磨刀石與20金幣後必定強化成功', () => {
+  let state = eventState('ruins-treasure-blacksmith');
+  state.player.equipment = ['knight-hammer'];
+  state.player.inventory = [{ itemId: 'whetstone', quantity: 1 }];
+  state.player.gold = 20;
+
+  state = chooseEventOption(state, 'forge-guaranteed', { eventRng: zero });
+  state = chooseEventWeapon(state, 'knight-hammer', { eventRng: () => 0.999 });
+
+  assert.equal(state.player.gold, 0);
+  assert.deepEqual(state.player.inventory, []);
+  assert.deepEqual(state.player.equipment, ['reinforced-knight-hammer']);
+});
+
+test('冒險者屍體先判定菁英怪，抽中時該次沒有戰利品', () => {
+  let state = eventState('ruins-adventurer-corpse');
+
+  state = chooseEventOption(state, 'search', {
+    eventRng: sequence([0, 0.249, 0, 0]),
+    monsterRng: zero,
+  });
+
+  assert.equal(state.phase, GamePhase.PLAYER_TURN);
+  assert.equal(state.enemy.rank, 'elite');
+  assert.equal(state.player.gold, 0);
+  assert.deepEqual(state.player.inventory, []);
+  assert.deepEqual(state.player.equipment, []);
+});
+
+test('冒險者屍體保留先前收穫，後續遇到菁英怪時不取得當次戰利品', () => {
+  let state = eventState('ruins-adventurer-corpse');
+  state = chooseEventOption(state, 'search', {
+    eventRng: sequence([0, 0.25, 0.5, 0]),
+  });
+  assert.equal(state.event.stage, 'corpse-search');
+  assert.equal(state.player.gold, 10);
+
+  state = searchAdventurerCorpse(state, {
+    eventRng: sequence([0.499, 0, 0]),
+    monsterRng: zero,
+  });
+  assert.equal(state.enemy.rank, 'elite');
+  assert.equal(state.player.gold, 10);
+});
+
+test('冒險者屍體最多搜刮3次，取得武器後不會再次抽到武器', () => {
+  let state = eventState('ruins-adventurer-corpse');
+  state = chooseEventOption(state, 'search', {
+    eventRng: sequence([0, 0.25, 0.35, 0]),
+  });
+  assert.deepEqual(state.player.equipment, ['sword']);
+
+  state = searchAdventurerCorpse(state, {
+    eventRng: sequence([0.5, 0.35, 0]),
+  });
+  assert.equal(state.player.gold, 10);
+
+  state = searchAdventurerCorpse(state, {
+    eventRng: sequence([0.75, 0.1, 0]),
+  });
+  assert.equal(state.event.stage, 'result');
+  assert.deepEqual(state.player.equipment, ['sword']);
+  assert.equal(state.player.inventory.length, 1);
+  assert.match(state.event.result.text, /搜刮結束/);
+});
+
+test('冒險者屍體可帶著目前的收穫主動離開', () => {
+  let state = eventState('ruins-adventurer-corpse');
+  state = chooseEventOption(state, 'search', {
+    eventRng: sequence([0, 0.25, 0.5, 0]),
+  });
+  state = leaveAdventurerCorpse(state);
+
+  assert.equal(state.player.gold, 10);
+  assert.equal(state.event.stage, 'result');
+  assert.match(state.event.result.text, /帶著目前找到的財物離開/);
 });
 
 test('神秘商店共用價格累積購買道具與技能升級，離開後清空', () => {

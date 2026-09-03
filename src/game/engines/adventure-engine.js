@@ -6,6 +6,7 @@ import {
   MonsterSkillActivation,
 } from '../data/monster-skills.js';
 import { getRegion } from '../data/regions.js';
+import { getItem } from '../data/items.js';
 import { applyEffects } from './effects.js';
 import { drawEncounter } from './encounter-engine.js';
 import { drawEvent } from './event-engine.js';
@@ -31,7 +32,7 @@ export function createAdventureProgress(regionId = 'ruins') {
 
 export function drawNextAdventureNode(
   progress,
-  { rng = Math.random, minimumEliteChance = 0 } = {},
+  { rng = Math.random, minimumEliteChance = 0, player = null } = {},
 ) {
   const region = getRegion(progress.regionId);
   const bossChance = bossEncounterChance(progress, region);
@@ -51,7 +52,7 @@ export function drawNextAdventureNode(
   if (eventAllowed && probabilityRoll(rng) < eventRule.chance) {
     const rarity = drawEventRarity(rng);
     const event = drawEvent(rarity, {
-      events: Object.values(EVENTS),
+      events: Object.values(EVENTS).filter((entry) => eventRequirementsMet(entry, player)),
       regionTags: region.tags,
       rng,
     });
@@ -81,6 +82,11 @@ export function drawNextAdventureNode(
     bossChance,
     region,
   );
+}
+
+function eventRequirementsMet(event, player) {
+  if (!event.requirements?.upgradableEquipment) return true;
+  return (player?.equipment ?? []).some((itemId) => getItem(itemId).weaponUpgradeId);
 }
 
 export function bossEncounterChance(progress, region = getRegion(progress.regionId)) {
@@ -120,6 +126,7 @@ export function scaleEnemyUnit(unit, depth, region = getRegion('ruins')) {
     tags: [...unit.tags],
     hp: Math.ceil(unit.stats.maxHp * multipliers.maxHp),
     maxHp: Math.ceil(unit.stats.maxHp * multipliers.maxHp),
+    armor: Math.max(0, Number(unit.stats.armor ?? 0)),
     baseDamage: Math.ceil(unit.stats.attack * multipliers.baseDamage),
     baseMaxHp: unit.stats.maxHp,
     baseDamageBeforeScaling: unit.stats.attack,
