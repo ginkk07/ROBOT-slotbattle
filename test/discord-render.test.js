@@ -13,6 +13,7 @@ import {
   activateSkill,
   abandonGame,
   chooseEventOption,
+  chooseEventSkill,
   confirmCombatVictory,
   createGame,
   GamePhase,
@@ -479,16 +480,22 @@ test('奇遇先顯示冒險進度，再顯示不公開名稱的奇遇內文', ()
   assert.equal(embed.footer, undefined);
   assert.doesNotMatch(JSON.stringify(payload), /神秘泉水/);
   assert.doesNotMatch(JSON.stringify(payload), /奇遇名稱不會顯示/);
+  assert.doesNotMatch(JSON.stringify(payload.components), /放棄遊戲/);
   assert.deepEqual(labels, ['飲用泉水', '離開泉水']);
 
   state.event.stage = 'result';
   state.event.result = { text: '你覺得身體裡充滿活力，HP 回滿了。' };
-  const resultEmbed = renderGame(state).embeds[0];
+  const resultPayload = renderGame(state);
+  const resultEmbed = resultPayload.embeds[0];
 
   assert.equal(resultEmbed.title, '冒險進度');
   assert.equal(
     resultEmbed.description,
     '地區 1｜本區完成 0 次遭遇\n\n【奇遇】你覺得身體裡充滿活力，HP 回滿了。',
+  );
+  assert.deepEqual(
+    resultPayload.components[0].components.map((component) => component.label),
+    ['繼續冒險'],
   );
 });
 
@@ -521,7 +528,7 @@ test('密封石室揭示裝備效果後顯示收下與放回按鈕', () => {
   ));
 
   assert.match(payload.embeds[0].description, /效果｜/);
-  assert.deepEqual(labels, ['收下裝備', '放回石臺', '放棄遊戲']);
+  assert.deepEqual(labels, ['收下裝備', '放回石臺']);
 });
 
 test('尋寶中的鐵匠只顯示玩家持有的可強化武器', () => {
@@ -629,8 +636,42 @@ test('冒險者屍體安全搜刮後顯示繼續與離開選項', () => {
   assert.deepEqual(labels, [
     '繼續搜刮',
     '帶著目前的收穫離開',
-    '放棄遊戲',
   ]);
+});
+
+test('神秘收藏家首次轉動失敗後顯示全部重轉與三個鎖定按鈕', () => {
+  const event = getEvent('ruins-mysterious-collector');
+  let state = createGame({
+    id: 'collector-render',
+    ownerId: 'player-1',
+    config: { initialEnemyUnitId: 'ruins-sentinel' },
+    loadout: { skillIds: ['life-recovery'], itemIds: [] },
+    monsterRng: () => 0,
+  });
+  state.phase = GamePhase.EVENT;
+  state.enemy = null;
+  state.event = {
+    eventId: event.id,
+    name: event.name,
+    description: event.description,
+    rarity: event.rarity,
+    stage: 'choice',
+    options: event.options.map(({ id, label }) => ({ id, label })),
+    result: null,
+  };
+  state = chooseEventOption(state, 'challenge-item', {
+    eventRng: sequence([0, 0]),
+  });
+  state = chooseEventSkill(state, 'life-recovery', {
+    eventRng: sequence([0, 0.4, 0.7]),
+  });
+
+  const payload = renderGame(state);
+  const labels = payload.components[0].components.map((component) => component.label);
+
+  assert.equal(state.event.stage, 'collector-spin');
+  assert.equal(labels[0], '全部重新轉動');
+  assert.deepEqual(labels.slice(1).map((label) => label.match(/[^ ]+$/u)[0]), ['⚔️', '🛡️', '✨']);
 });
 
 test('年邁探險家的資助按鈕會在金幣不足時停用', () => {

@@ -277,6 +277,9 @@ async function ensureCurrentProfile(store, userId) {
 
 async function saveAndRender(store, session, next, userId) {
   try {
+    // 顯示資料若有問題，必須在寫入存檔前失敗，避免玩家看到操作失敗，
+    // 但遊戲狀態其實已經前進而無法再次選擇。
+    renderGame(next);
     const settled = await settleFinishedRun(store, next, userId);
     const saved = await store.saveSession(settled, {
       expectedRevision: session.revision,

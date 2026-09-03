@@ -123,25 +123,37 @@ export const EVENTS = createCatalog([
     weight: 100,
     tags: ['ruins'],
     description: '你在斷牆後發現一座廢棄營地。火堆早已熄滅，但破損的帳篷仍勉強能夠遮蔽風雨。連日的戰鬥讓你感到疲憊，也許可以在這裡休息片刻。',
-    options: [{
-      id: 'rest',
-      label: '留下休息',
-      outcomes: [
-        {
-          id: 'fully-rested',
-          type: 'full-heal',
-          weight: 70,
-          text: '你重新點燃火堆，在微弱的火光旁沉沉睡去。當你再次醒來時，身上的疲憊與傷勢已經完全消失。',
-        },
-        {
-          id: 'ambushed',
-          type: 'start-combat',
-          rank: 'normal',
-          weight: 30,
-          text: '你才剛閉上雙眼，營地外便傳來踩斷枯枝的聲響。黑暗中的腳步正迅速逼近，你立刻握緊武器起身迎戰！',
-        },
-      ],
-    }],
+    options: [
+      {
+        id: 'rest',
+        label: '留下休息',
+        outcomes: [
+          {
+            id: 'fully-rested',
+            type: 'full-heal',
+            weight: 70,
+            text: '你重新點燃火堆，在微弱的火光旁沉沉睡去。當你再次醒來時，身上的疲憊與傷勢已經完全消失。',
+          },
+          {
+            id: 'ambushed',
+            type: 'start-combat',
+            rank: 'normal',
+            weight: 30,
+            text: '你才剛閉上雙眼，營地外便傳來踩斷枯枝的聲響。黑暗中的腳步正迅速逼近，你立刻握緊武器起身迎戰！',
+          },
+        ],
+      },
+      {
+        id: 'leave',
+        label: '不休息並離開',
+        outcomes: [{
+          id: 'left-abandoned-camp',
+          type: 'continue',
+          weight: 100,
+          text: '你決定不在陌生的營地停留，帶著疲憊繼續前進。身後熄滅的火堆很快便消失在遺跡的陰影中。',
+        }],
+      },
+    ],
   },
   {
     id: 'ruins-disordered-footprints',

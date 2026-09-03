@@ -625,6 +625,18 @@ test('廢棄營地伏擊會直接進入普通戰鬥且不恢復生命', () => {
   assert.equal(state.player.hp, 9);
 });
 
+test('廢棄營地可以不休息直接離開且不恢復生命', () => {
+  let state = eventState('ruins-abandoned-camp');
+  state.player.hp = 9;
+  state = chooseEventOption(state, 'leave', { eventRng: zero });
+
+  assert.equal(state.phase, GamePhase.EVENT);
+  assert.equal(state.enemy, null);
+  assert.equal(state.player.hp, 9);
+  assert.equal(state.event.stage, 'result');
+  assert.match(state.event.result.text, /不在陌生的營地停留/);
+});
+
 test('雜亂足跡有50%取得20～30金幣，另50%進入普通戰鬥', () => {
   let rewardState = eventState('ruins-disordered-footprints');
   rewardState = chooseEventOption(rewardState, 'follow', {

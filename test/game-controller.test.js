@@ -305,6 +305,74 @@ test('控制器可搜刮冒險者屍體並帶著既有收穫離開', async () =>
   assert.match(left.payload.embeds[0].description, /帶著目前找到的財物離開/);
 });
 
+test('控制器選定收藏家賭注後會顯示轉輪與鎖定按鈕', async () => {
+  const store = new MemoryGameStore();
+  const controller = controllerFor(store, 'collector-controller', {
+    eventRng: sequence([0, 0, 0, 0.4, 0.7]),
+  });
+  await controller.handleCommand({
+    commandName: 'slotbattle',
+    subcommand: 'start',
+    userId: 'player-1',
+  });
+  await moveSessionToEvent(store, 'collector-controller', 'ruins-mysterious-collector');
+
+  await controller.handleComponent({
+    customId: 'slotbattle:collector-controller:event-option:challenge-item',
+    userId: 'player-1',
+  });
+  const wagered = await controller.handleComponent({
+    customId: 'slotbattle:collector-controller:event-skill:life-recovery',
+    userId: 'player-1',
+  });
+  const saved = await store.getSession('collector-controller');
+  const labels = wagered.payload.components[0].components.map((component) => component.label);
+
+  assert.equal(saved.state.event.stage, 'collector-spin');
+  assert.equal(saved.state.event.collector.attempt, 1);
+  assert.equal(labels[0], '全部重新轉動');
+  assert.deepEqual(labels.slice(1).map((label) => label.match(/[^ ]+$/u)[0]), ['⚔️', '🛡️', '✨']);
+});
+
+test('新畫面無法產生時不會先保存已前進的奇遇狀態', async () => {
+  const store = new MemoryGameStore();
+  const controller = controllerFor(store, 'render-guard-controller', {
+    eventRng: sequence([0, 0, 0, 0.4, 0.7, 0.4, 0.7]),
+  });
+  await controller.handleCommand({
+    commandName: 'slotbattle',
+    subcommand: 'start',
+    userId: 'player-1',
+  });
+  await moveSessionToEvent(store, 'render-guard-controller', 'ruins-mysterious-collector');
+  await controller.handleComponent({
+    customId: 'slotbattle:render-guard-controller:event-option:challenge-item',
+    userId: 'player-1',
+  });
+  await controller.handleComponent({
+    customId: 'slotbattle:render-guard-controller:event-skill:life-recovery',
+    userId: 'player-1',
+  });
+
+  const corrupted = await store.getSession('render-guard-controller');
+  corrupted.state.event.collector.reels[0] = 'unknown-symbol';
+  const before = await store.saveSession(corrupted.state, {
+    expectedRevision: corrupted.revision,
+  });
+
+  await assert.rejects(
+    controller.handleComponent({
+      customId: 'slotbattle:render-guard-controller:event-collector-spin:0',
+      userId: 'player-1',
+    }),
+    /emoji/,
+  );
+  const after = await store.getSession('render-guard-controller');
+
+  assert.equal(after.revision, before.revision);
+  assert.equal(after.state.event.collector.attempt, 1);
+});
+
 test('其他玩家無法操作別人的戰鬥面板', async () => {
   const store = new MemoryGameStore();
   const controller = controllerFor(store, 'owner-test');
@@ -415,3 +483,8 @@ test('主動放棄會結算永久紀錄並清除本輪配置', async () => {
   assert.deepEqual(session.state.player.skillIds, []);
   assert.equal(profile.profile.lifetimeStats.runsEnded, 1);
 });
+
+function sequence(values) {
+  let index = 0;
+  return () => values[index++];
+}

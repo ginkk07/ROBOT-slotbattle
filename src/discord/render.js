@@ -21,7 +21,7 @@ import {
   getEnemyIntent,
   isStunned,
 } from '../game/engine.js';
-import { formatReels } from '../game/symbols.js';
+import { formatReels, SYMBOL_META } from '../game/symbols.js';
 
 const COLORS = Object.freeze({
   active: 0x7c5cff,
@@ -291,38 +291,31 @@ function eventControls(state) {
         label: '繼續冒險',
         style: BUTTON_STYLE.PRIMARY,
       }),
-      abandonButton(state.id),
     ])];
   }
 
   if (event.stage === 'choice') {
-    return [
-      actionRow(event.options.map((option) => button({
-        customId: gameCustomId(state.id, 'event-option', option.id),
-        label: option.label,
-        style: BUTTON_STYLE.PRIMARY,
-        disabled: eventOptionUnavailable(state, option),
-      }))),
-      actionRow([abandonButton(state.id)]),
-    ];
+    return [actionRow(event.options.map((option) => button({
+      customId: gameCustomId(state.id, 'event-option', option.id),
+      label: option.label,
+      style: BUTTON_STYLE.PRIMARY,
+      disabled: eventOptionUnavailable(state, option),
+    })))];
   }
 
   if (event.stage === 'vault-reward-choice') {
-    return [
-      actionRow([
-        button({
-          customId: gameCustomId(state.id, 'event-vault-reward', 'accept'),
-          label: '收下裝備',
-          style: BUTTON_STYLE.SUCCESS,
-        }),
-        button({
-          customId: gameCustomId(state.id, 'event-vault-reward', 'leave'),
-          label: '放回石臺',
-          style: BUTTON_STYLE.SECONDARY,
-        }),
-      ]),
-      actionRow([abandonButton(state.id)]),
-    ];
+    return [actionRow([
+      button({
+        customId: gameCustomId(state.id, 'event-vault-reward', 'accept'),
+        label: '收下裝備',
+        style: BUTTON_STYLE.SUCCESS,
+      }),
+      button({
+        customId: gameCustomId(state.id, 'event-vault-reward', 'leave'),
+        label: '放回石臺',
+        style: BUTTON_STYLE.SECONDARY,
+      }),
+    ])];
   }
 
   if ([
@@ -335,66 +328,54 @@ function eventControls(state) {
       'collector-wager-choice': '賭上',
       'collector-replace-choice': '替換',
     }[event.stage];
-    return [
-      actionRow(event.skillChoices.map((skillId) => button({
-        customId: gameCustomId(state.id, 'event-skill', skillId),
-        label: `${prefix} ${getSkill(skillId).name}`,
-        style: BUTTON_STYLE.PRIMARY,
-      }))),
-      actionRow([abandonButton(state.id)]),
-    ];
+    return [actionRow(event.skillChoices.map((skillId) => button({
+      customId: gameCustomId(state.id, 'event-skill', skillId),
+      label: `${prefix} ${getSkill(skillId).name}`,
+      style: BUTTON_STYLE.PRIMARY,
+    })))];
   }
 
   if (event.stage === 'weapon-upgrade-choice') {
-    return [
-      actionRow(event.weaponChoices.map((itemId) => {
-        const item = getItem(itemId);
-        const upgraded = getItem(item.weaponUpgradeId);
-        return button({
-          customId: gameCustomId(state.id, 'event-weapon', itemId),
-          label: `${item.name} → ${upgraded.name}`,
-          style: BUTTON_STYLE.SUCCESS,
-        });
-      })),
-      actionRow([abandonButton(state.id)]),
-    ];
+    return [actionRow(event.weaponChoices.map((itemId) => {
+      const item = getItem(itemId);
+      const upgraded = getItem(item.weaponUpgradeId);
+      return button({
+        customId: gameCustomId(state.id, 'event-weapon', itemId),
+        label: `${item.name} → ${upgraded.name}`,
+        style: BUTTON_STYLE.SUCCESS,
+      });
+    }))];
   }
 
   if (event.stage === 'corpse-search') {
     const finalSearch = Number(event.corpse?.attempts ?? 0) >= 2;
-    return [
-      actionRow([
-        button({
-          customId: gameCustomId(state.id, 'event-corpse-search'),
-          label: finalSearch ? '進行最後一次搜刮' : '繼續搜刮',
-          style: BUTTON_STYLE.PRIMARY,
-        }),
-        button({
-          customId: gameCustomId(state.id, 'event-corpse-leave'),
-          label: '帶著目前的收穫離開',
-          style: BUTTON_STYLE.SECONDARY,
-        }),
-      ]),
-      actionRow([abandonButton(state.id)]),
-    ];
+    return [actionRow([
+      button({
+        customId: gameCustomId(state.id, 'event-corpse-search'),
+        label: finalSearch ? '進行最後一次搜刮' : '繼續搜刮',
+        style: BUTTON_STYLE.PRIMARY,
+      }),
+      button({
+        customId: gameCustomId(state.id, 'event-corpse-leave'),
+        label: '帶著目前的收穫離開',
+        style: BUTTON_STYLE.SECONDARY,
+      }),
+    ])];
   }
 
   if (event.stage === 'collector-spin') {
-    return [
-      actionRow([
-        button({
-          customId: gameCustomId(state.id, 'event-collector-spin', 'none'),
-          label: '全部重新轉動',
-          style: BUTTON_STYLE.PRIMARY,
-        }),
-        ...event.collector.reels.map((symbolId, index) => button({
-          customId: gameCustomId(state.id, 'event-collector-spin', String(index)),
-          label: `鎖定第${index + 1}格 ${SYMBOL_META[symbolId].emoji}`,
-          style: BUTTON_STYLE.SECONDARY,
-        })),
-      ]),
-      actionRow([abandonButton(state.id)]),
-    ];
+    return [actionRow([
+      button({
+        customId: gameCustomId(state.id, 'event-collector-spin', 'none'),
+        label: '全部重新轉動',
+        style: BUTTON_STYLE.PRIMARY,
+      }),
+      ...event.collector.reels.map((symbolId, index) => button({
+        customId: gameCustomId(state.id, 'event-collector-spin', String(index)),
+        label: `鎖定第${index + 1}格 ${SYMBOL_META[symbolId].emoji}`,
+        style: BUTTON_STYLE.SECONDARY,
+      })),
+    ])];
   }
 
   if (event.stage === 'shop') {
@@ -424,7 +405,6 @@ function eventControls(state) {
         label: '離開商店',
         style: BUTTON_STYLE.SECONDARY,
       }),
-      abandonButton(state.id),
     ]));
     return rows;
   }
