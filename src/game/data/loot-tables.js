@@ -4,7 +4,7 @@ export const LOOT_TABLES = createCatalog([
   {
     id: 'ruins-common-loot',
     choices: 3,
-    dropChance: 0.1,
+    dropChance: 0.25,
     contentTypes: ['equipment'],
     rarityWeights: { common: 90, rare: 10, legendary: 0 },
     gold: { minimum: 10, maximum: 20 },
@@ -12,7 +12,7 @@ export const LOOT_TABLES = createCatalog([
   {
     id: 'ruins-elite-loot',
     choices: 3,
-    dropChance: 0.75,
+    dropChance: 0.5,
     contentTypes: ['equipment', 'skill'],
     rarityWeights: { common: 70, rare: 29, legendary: 1 },
     gold: { minimum: 15, maximum: 30 },

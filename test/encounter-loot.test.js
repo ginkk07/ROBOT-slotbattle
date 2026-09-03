@@ -308,13 +308,13 @@ test('普通怪與Boss在各自機率邊界切換成技能，技能傷害使用�
 test('普通、菁英與Boss依各自機率掉落獎勵並給予金錢', () => {
   const normalMiss = rollCombatRewards('ruins-common-loot', {
     regionTags: ['ruins'],
-    rng: sequence([0.1, 0]),
+    rng: sequence([0.25, 0]),
   });
   assert.deepEqual(normalMiss, { dropped: false, gold: 10, choices: [] });
 
   const normalHit = rollCombatRewards('ruins-common-loot', {
     regionTags: ['ruins'],
-    rng: sequence([0.099, 0.999, 0, 0, 0, 0, 0, 0]),
+    rng: sequence([0.249, 0.999, 0, 0, 0, 0, 0, 0]),
   });
   assert.equal(normalHit.dropped, true);
   assert.equal(normalHit.gold, 20);
@@ -324,10 +324,17 @@ test('普通、菁英與Boss依各自機率掉落獎勵並給予金錢', () => {
     getItem(choice.contentId).type === 'equipment'
   )), true);
 
+  const eliteMiss = rollCombatRewards('ruins-elite-loot', {
+    regionTags: ['ruins'],
+    rng: sequence([0.5, 0]),
+  });
+  assert.deepEqual(eliteMiss, { dropped: false, gold: 15, choices: [] });
+
   const elite = rollCombatRewards('ruins-elite-loot', {
     regionTags: ['ruins'],
-    rng: sequence([0.749, 0.999, 0, 0, 0, 0, 0, 0]),
+    rng: sequence([0.499, 0.999, 0, 0, 0, 0, 0, 0]),
   });
+  assert.equal(elite.dropped, true);
   assert.equal(elite.gold, 30);
   assert.equal(elite.choices.every((choice) => (
     choice.contentType === 'item' || choice.contentType === 'skill'
