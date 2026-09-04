@@ -23,6 +23,15 @@ export const BossRuleMode = Object.freeze({
  * 不在主流程辨識是哪一個技能建立了狀態。
  */
 export const StatusTrigger = Object.freeze({
+  BATTLE_START: 'battle-start',
+  ROUND_START: 'round-start',
+  PLAYER_TURN_START: 'player-turn-start',
+  PLAYER_TURN_END: 'player-turn-end',
+  ENEMY_TURN_START: 'enemy-turn-start',
+  ENEMY_TURN_END: 'enemy-turn-end',
+  ROUND_END: 'round-end',
+  BATTLE_END: 'battle-end',
+  // 舊內容相容用。新狀態必須改用上方明確的角色／階段 Trigger。
   PASSIVE: 'passive',
   NEXT_SPIN_ATTACK: 'next-spin-attack',
   NEXT_SPIN_RESOURCE: 'next-spin-resource',

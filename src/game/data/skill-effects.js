@@ -11,6 +11,14 @@ export const SkillActivation = deepFreeze({
  * 不辨識技能 ID；同一時機可由多種被動效果共用。
  */
 export const PassiveSkillTrigger = deepFreeze({
+  BATTLE_START: 'battle-start',
+  ROUND_START: 'round-start',
+  PLAYER_TURN_START: 'player-turn-start',
+  PLAYER_TURN_END: 'player-turn-end',
+  ENEMY_TURN_START: 'enemy-turn-start',
+  ENEMY_TURN_END: 'enemy-turn-end',
+  ROUND_END: 'round-end',
+  BATTLE_END: 'battle-end',
   BEFORE_DAMAGE_TAKEN: 'before-damage-taken',
 });
 

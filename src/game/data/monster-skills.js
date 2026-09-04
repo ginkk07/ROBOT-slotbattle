@@ -5,11 +5,22 @@ export const MonsterSkillActivation = Object.freeze({
   PASSIVE: 'passive',
 });
 
+/** 怪物被動可明確掛接的戰鬥階段；未標示的舊被動視為 BATTLE_START。 */
+export const MonsterSkillTrigger = Object.freeze({
+  BATTLE_START: 'battle-start',
+  ROUND_START: 'round-start',
+  ENEMY_TURN_START: 'enemy-turn-start',
+  ENEMY_TURN_END: 'enemy-turn-end',
+  ROUND_END: 'round-end',
+  BATTLE_END: 'battle-end',
+});
+
 export const MONSTER_SKILLS = createCatalog([
   {
     id: 'armor-reinforcement',
     name: '護甲強化',
     activation: MonsterSkillActivation.PASSIVE,
+    trigger: MonsterSkillTrigger.BATTLE_START,
     effects: [{
       type: 'apply-status',
       statusId: 'armor-reinforcement',

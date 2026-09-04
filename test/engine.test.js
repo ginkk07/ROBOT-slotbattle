@@ -88,14 +88,14 @@ function eventState(eventId, skillIds = ['power-strike']) {
 
 test('新戰鬥取得4點行動點，護甲與法力從0開始', () => {
   const state = game();
-  assert.equal(state.schemaVersion, 7);
+  assert.equal(state.schemaVersion, 8);
   assert.equal(state.phase, GamePhase.PLAYER_TURN);
   assert.deepEqual(state.resources, { action: 4, armor: 0, mana: 0 });
   assert.equal(state.enemy.baseDefense, 0);
   assert.equal(state.enemy.armor, 0);
 });
 
-test('怪物基礎防禦力會在每個怪物回合開始重設護甲，不會累加', () => {
+test('怪物基礎防禦力會在每個 ROUND_START 重設護甲，不會累加', () => {
   let state = game({ enemy: { baseDamage: 0, baseDefense: 3 } });
 
   assert.equal(state.enemy.baseDefense, 3);
@@ -116,12 +116,113 @@ test('怪物基礎防禦力會在每個怪物回合開始重設護甲，不會�
   assert.equal(state.enemy.armor, 3);
   assert.equal(state.enemy.hp, 59);
 
-  // 戰鬥中變更的是基礎值；當下護甲不變，下個怪物回合才使用新數值。
+  // 戰鬥中變更的是基礎值；當下護甲不變，下個 ROUND_START 才使用新數值。
   state.enemy.baseDefense += 2;
   assert.equal(state.enemy.armor, 3);
   state = endPlayerTurn(state, { monsterRng: zero });
   assert.equal(state.enemy.baseDefense, 5);
   assert.equal(state.enemy.armor, 5);
+});
+
+test('第一個 Round 也會完成 ROUND_START 與 PLAYER_TURN_START', () => {
+  const state = createGame({
+    id: 'first-round-phases',
+    ownerId: 'player-1',
+    config: { initialEnemyUnitId: 'ruins-sentinel' },
+    loadout: { skillIds: ['power-strike'], itemIds: ['iron-shield'] },
+    monsterRng: zero,
+  });
+
+  assert.equal(state.round, 1);
+  assert.equal(state.phase, GamePhase.PLAYER_TURN);
+  // 鐵盾是 PLAYER_TURN_START 裝備，第一回合已經生效。
+  assert.equal(state.resources.armor, 5);
+  assert.equal(state.enemy.intent.type, 'basic-attack');
+});
+
+test('完整 Round 依明確階段結算，round 只在 ROUND_END 後增加', () => {
+  let state = game({ enemy: { baseDamage: 0 } });
+  state = endPlayerTurn(state, { monsterRng: zero });
+
+  assert.deepEqual(state.lastResolution.phaseOrder, [
+    'player-turn-end',
+    'enemy-turn-start',
+    'enemy-turn-end',
+    'round-end',
+    'round-start',
+    'player-turn-start',
+  ]);
+  assert.equal(state.lastResolution.round, 1);
+  assert.equal(state.round, 2);
+  assert.equal(state.phase, GamePhase.PLAYER_TURN);
+  assert.equal(state.enemy.intent.type, 'basic-attack');
+});
+
+test('ROUND_START 將玩家 baseDefense 疊加到保留護甲', () => {
+  let normal = game({ enemy: { baseDamage: 0 } });
+  normal.player.baseDefense = 3;
+  normal.resources.armor = 8;
+  normal = endPlayerTurn(normal, { monsterRng: zero });
+  assert.equal(normal.resources.armor, 3);
+
+  let retained = game({ enemy: { baseDamage: 0 } });
+  retained.player.baseDefense = 3;
+  retained.player.equipment = ['diamond'];
+  retained.resources.armor = 14;
+  retained = endPlayerTurn(retained, { monsterRng: zero });
+  // ROUND_END 保留 floor(14 × 0.5)=7，ROUND_START 再加上 baseDefense 3。
+  assert.equal(retained.resources.armor, 10);
+});
+
+test('一般狀態 remainingTurns 在每個 ROUND_END 只扣一次', () => {
+  let state = game({ enemy: { baseDamage: 0 } });
+  state.player.activeStatuses.push({
+    statusId: 'regeneration',
+    sourceUnitId: state.player.unitId,
+    remainingTurns: 3,
+    stacks: 1,
+    potency: 1,
+  });
+  state = endPlayerTurn(state, { monsterRng: zero });
+
+  assert.equal(
+    state.player.activeStatuses.find((status) => status.statusId === 'regeneration')
+      ?.remainingTurns,
+    2,
+  );
+});
+
+test('ROUND_START 已決定 intent，玩家回合結束效果擊殺敵人不進敵方回合', () => {
+  let state = game({ enemy: { maxHp: 1, baseDamage: 99 } });
+  state.player.equipment = ['star-sea-compass'];
+  state.resources.mana = 1;
+  assert.equal(state.enemy.intent.type, 'basic-attack');
+
+  state = endPlayerTurn(state, { monsterRng: zero });
+  assert.equal(state.phase, GamePhase.VICTORY_CONFIRM);
+  assert.equal(state.player.hp, state.player.maxHp);
+  assert.equal(state.round, 1);
+  assert.equal(state.lastResolution, null);
+});
+
+test('怪物 intent 在執行時使用最新 baseDamage', () => {
+  let state = game({ enemy: { baseDamage: 1 } });
+  assert.equal(state.enemy.intent.type, 'basic-attack');
+  state.enemy.baseDamage = 7;
+  state = endPlayerTurn(state, { monsterRng: zero });
+
+  assert.equal(state.lastResolution.enemyAttack, 7);
+  assert.equal(state.lastResolution.damageTaken, 7);
+});
+
+test('怪物行動殺死玩家時不會開始下一個 Round', () => {
+  let state = game({ enemy: { baseDamage: 1 } });
+  state.player.hp = 1;
+  state = endPlayerTurn(state, { monsterRng: zero });
+
+  assert.equal(state.status, GameStatus.LOST);
+  assert.equal(state.phase, GamePhase.ENDED);
+  assert.equal(state.round, 1);
 });
 
 test('每次拉霸會立即攻擊並累積本回合護甲與法力', () => {
@@ -734,7 +835,7 @@ test('華麗寶箱可取得物品或技能卷軸，60%分支會遭遇指定寶�
   let mimicState = eventState('ruins-ornate-chest');
   mimicState = chooseEventOption(mimicState, 'open', {
     eventRng: sequence([0.5]),
-    monsterRng: sequence([0.5, 0]),
+    monsterRng: sequence([0.99, 0]),
   });
   assert.equal(mimicState.phase, GamePhase.PLAYER_TURN);
   assert.equal(mimicState.enemy.unitId, 'ruins-mimic');
@@ -747,11 +848,11 @@ test('破甲攻擊附加2層裝甲破壞，無護甲時保留並在後續攻擊�
   let state = eventState('ruins-ornate-chest');
   state = chooseEventOption(state, 'open', {
     eventRng: sequence([0.5]),
-    monsterRng: sequence([0.5, 0]),
+    monsterRng: sequence([0.99, 0]),
   });
   state.resources.armor = 0;
   state = endPlayerTurn(state, {
-    monsterRng: sequence([0, 0.5, 0]),
+    monsterRng: sequence([0.5, 0, 0]),
   });
   assert.equal(state.lastResolution.armorBroken, 0);
   assert.equal(state.lastResolution.armorUsed, 0);
@@ -761,7 +862,7 @@ test('破甲攻擊附加2層裝甲破壞，無護甲時保留並在後續攻擊�
 
   state.resources.armor = 0;
   state = endPlayerTurn(state, {
-    monsterRng: sequence([0, 0]),
+    monsterRng: sequence([0.5, 0, 0]),
   });
   assert.equal(state.lastResolution.armorBroken, 0);
   assert.equal(state.player.activeStatuses[0].stacks, 4);
@@ -1010,7 +1111,7 @@ test('舊版Boss戰存檔會升級為冒險格式', () => {
   legacy.resources = { action: 1, attack: 6, defense: 3, skill: 2 };
   const upgraded = upgradeGameState(legacy);
 
-  assert.equal(upgraded.schemaVersion, 7);
+  assert.equal(upgraded.schemaVersion, 8);
   assert.equal(upgraded.enemy.hp, 54);
   assert.deepEqual(upgraded.resources, { action: 1, armor: 3, mana: 2 });
   assert.equal(upgraded.adventure.regionDepth, 1);

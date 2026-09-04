@@ -67,7 +67,12 @@ import {
   rollRewardChoices,
   rollShopItemChoices,
 } from './engines/loot-engine.js';
-import { selectMonsterIntent } from './engines/monster-action-engine.js';
+import {
+  monsterPassiveEffects,
+  resolveMonsterIntent,
+  selectMonsterIntent,
+} from './engines/monster-action-engine.js';
+import { MonsterSkillTrigger } from './data/monster-skills.js';
 import { resolvePassiveSkillEffects } from './engines/passive-skill-engine.js';
 import {
   grantSkillReward,
@@ -92,7 +97,7 @@ import { drawReels, resolveSymbolChances } from './random.js';
 import { scoreSpin } from './scoring.js';
 import { SYMBOL_META, SymbolId } from './symbols.js';
 
-export const GAME_STATE_VERSION = 7;
+export const GAME_STATE_VERSION = 8;
 
 export const GameStatus = Object.freeze({
   ACTIVE: 'active',
@@ -602,7 +607,9 @@ export function confirmCombatVictory(
   return next;
 }
 
-export function endPlayerTurn(
+// 保留舊結算器作為讀取歷史紀錄時的參考；所有新的戰鬥都走下方的
+// 明確階段生命週期。不要重新呼叫這個函式。
+function resolveLegacyEndPlayerTurn(
   state,
   { monsterRng = Math.random, rewardRng = Math.random } = {},
 ) {
@@ -814,6 +821,369 @@ export function endPlayerTurn(
   });
   if (enemyDefeatedByReaction) awaitCombatVictoryConfirmation(next);
   return next;
+}
+
+/**
+ * 結束玩家操作，依序推進 PLAYER_TURN_END → ENEMY_TURN_START →
+ * ENEMY_TURN → ENEMY_TURN_END → ROUND_END，再開始下一個完整 Round。
+ */
+export function endPlayerTurn(
+  state,
+  { monsterRng = Math.random, rewardRng = Math.random } = {},
+) {
+  const next = upgradeGameState(state);
+  if (next.status !== GameStatus.ACTIVE || next.phase !== GamePhase.PLAYER_TURN) {
+    throw new Error('目前無法結束回合');
+  }
+
+  const resolvedRound = next.round;
+  const wasStunned = isStunned(next);
+  const discardedAction = next.resources.action;
+  const phaseOrder = [StatusTrigger.PLAYER_TURN_END];
+  const playerTurnEnd = runPlayerTurnEnd(next);
+  if (finishIfDefeated(next)) return next;
+
+  phaseOrder.push(StatusTrigger.ENEMY_TURN_START);
+  const enemyTurnStart = beginEnemyTurn(next, { monsterRng });
+  if (finishIfDefeated(next)) return next;
+
+  const enemyAction = resolveEnemyTurn(next, { monsterRng });
+  if (next.player.hp === 0) {
+    finishRun(next, GameStatus.LOST, next.enemy.name);
+    return next;
+  }
+  if (next.enemy.hp === 0) {
+    recordTurnResolution(next, {
+      resolvedRound,
+      wasStunned,
+      discardedAction,
+      enemyTurnStart,
+      enemyAction,
+      playerTurnEnd,
+      phaseOrder,
+    });
+    awaitCombatVictoryConfirmation(next);
+    return next;
+  }
+
+  phaseOrder.push(StatusTrigger.ENEMY_TURN_END);
+  const enemyTurnEnd = runEnemyTurnEnd(next);
+  if (finishIfDefeated(next)) return next;
+
+  phaseOrder.push(StatusTrigger.ROUND_END);
+  const roundEnd = endRound(next);
+  if (finishIfDefeated(next)) return next;
+
+  next.round += 1;
+  phaseOrder.push(StatusTrigger.ROUND_START);
+  const roundStart = beginRound(next, { monsterRng });
+  if (finishIfDefeated(next)) return next;
+
+  phaseOrder.push(StatusTrigger.PLAYER_TURN_START);
+  const playerTurnStart = beginPlayerTurn(next);
+  if (finishIfDefeated(next)) return next;
+  recordTurnResolution(next, {
+    resolvedRound,
+    wasStunned,
+    discardedAction,
+    enemyTurnStart,
+    enemyAction,
+    playerTurnEnd,
+    enemyTurnEnd,
+    roundEnd,
+    roundStart,
+    playerTurnStart,
+    phaseOrder,
+  });
+  return next;
+}
+
+function beginRound(state, { monsterRng = Math.random } = {}) {
+  state.phase = GamePhase.PLAYER_TURN;
+  state.combatModifiers.damageDealtThisTurn = 0;
+  state.combatModifiers.damageDealtBySource = createDamageSourceTotals();
+  state.combatModifiers.usedTurnEquipmentEffects = {};
+  state.resources.action = playerActionLimit(state);
+  resetPlayerRoundArmor(state);
+  resetUnitArmorToBaseDefense(state.enemy);
+
+  const playerStatus = resolveTriggeredStatuses(state, 'player', StatusTrigger.ROUND_START);
+  state.player = playerStatus.unit;
+  const enemyStatus = resolveTriggeredStatuses(state, 'enemy', StatusTrigger.ROUND_START);
+  state.enemy = enemyStatus.unit;
+  const equipment = runEquipmentPhase(state, ItemEffectTrigger.ROUND_START);
+  const playerPassive = runPlayerPassivePhase(state, PassiveSkillTrigger.ROUND_START);
+  const enemyPassive = runMonsterPassivePhase(state, MonsterSkillTrigger.ROUND_START);
+  if (state.enemy.hp > 0 && state.player.hp > 0) {
+    state.enemy.intent = selectMonsterIntent(state.enemy, { rng: monsterRng });
+  }
+  return { playerStatus, enemyStatus, equipment, playerPassive, enemyPassive };
+}
+
+function beginPlayerTurn(state) {
+  state.phase = GamePhase.PLAYER_TURN;
+  const playerStatus = resolveTriggeredStatuses(
+    state,
+    'player',
+    StatusTrigger.PLAYER_TURN_START,
+  );
+  state.player = playerStatus.unit;
+  const healing = applyHealingEquipmentBonus(state, playerStatus.events);
+  const equipment = applyPlayerTurnStartEquipmentEffects(state);
+  const passive = runPlayerPassivePhase(state, PassiveSkillTrigger.PLAYER_TURN_START);
+  return { playerStatus, healing, equipment, passive };
+}
+
+function runPlayerTurnEnd(state) {
+  const playerStatus = resolveTriggeredStatuses(
+    state,
+    'player',
+    StatusTrigger.PLAYER_TURN_END,
+  );
+  state.player = playerStatus.unit;
+  const healing = applyHealingEquipmentBonus(state, playerStatus.events);
+  const equipment = [
+    ...runEquipmentPhase(state, ItemEffectTrigger.PLAYER_TURN_END),
+    ...resolvePlayerTurnEndEquipment(state),
+  ];
+  const passive = runPlayerPassivePhase(state, PassiveSkillTrigger.PLAYER_TURN_END);
+  return { playerStatus, healing, equipment, passive };
+}
+
+function beginEnemyTurn(state, { monsterRng }) {
+  const enemyStatus = resolveTriggeredStatuses(
+    state,
+    'enemy',
+    StatusTrigger.ENEMY_TURN_START,
+  );
+  state.enemy = enemyStatus.unit;
+  const passive = runMonsterPassivePhase(state, MonsterSkillTrigger.ENEMY_TURN_START, {
+    rng: monsterRng,
+  });
+  return { enemyStatus, passive };
+}
+
+function resolveEnemyTurn(state, { monsterRng }) {
+  const intent = resolveMonsterIntent(state.enemy, state.enemy.intent);
+  const armorBroken = removeArmorBeforeIncomingDamage(state);
+  const armorUsed = Math.min(state.resources.armor, intent.damage);
+  state.resources.armor = Math.max(0, state.resources.armor - armorUsed);
+  const incomingAfterArmor = Math.max(0, intent.damage - armorUsed);
+  const reducedIncomingDamage = reduceIncomingDamageWithEquipment(
+    state.player,
+    incomingAfterArmor,
+  );
+  const manaBeforePassiveSkills = state.resources.mana;
+  const passiveSkillResolution = resolvePassiveSkillEffects(
+    state.player,
+    PassiveSkillTrigger.BEFORE_DAMAGE_TAKEN,
+    {
+      damage: reducedIncomingDamage,
+      resources: state.resources,
+      sealedSkillIds: state.combatModifiers.sealedSkillIds,
+    },
+  );
+  state.resources = passiveSkillResolution.context.resources;
+  const passiveDamageBlocked = Math.max(
+    0,
+    reducedIncomingDamage - passiveSkillResolution.context.damage,
+  );
+  const passiveManaSpent = Math.max(
+    0,
+    manaBeforePassiveSkills - state.resources.mana,
+  );
+  const damageTaken = Math.min(state.player.hp, passiveSkillResolution.context.damage);
+  state.player.hp -= damageTaken;
+  const enemyAttackDamageEvent = {
+    type: 'damage',
+    element: 'physical',
+    requested: intent.damage,
+    amount: damageTaken,
+    damageSource: DamageSource.EXTRA,
+    target: 'self',
+    armorBroken,
+    armorUsed,
+    passiveDamageBlocked,
+  };
+  const damageFollowUpEvents = resolveDamageFollowUps(state, {
+    attacker: 'enemy',
+    target: 'player',
+    requested: intent.damage,
+    amount: damageTaken,
+    damageSource: DamageSource.EXTRA,
+  });
+  const monsterEffectEvents = state.player.hp > 0 && state.enemy.hp > 0
+    ? applyMonsterEffects(state, intent.effects, { rng: monsterRng })
+    : [];
+  const reactiveStatusResult = state.player.hp > 0 && state.enemy.hp > 0
+    ? resolveAfterEnemyAttackStatuses(state.player, state.enemy, { rng: monsterRng })
+    : { holder: state.player, attacker: state.enemy, events: [] };
+  state.player = reactiveStatusResult.holder;
+  state.enemy = reactiveStatusResult.attacker;
+  return {
+    intent,
+    armorBroken,
+    armorUsed,
+    passiveSkillResolution,
+    passiveDamageBlocked,
+    passiveManaSpent,
+    damageTaken,
+    enemyAttackDamageEvent,
+    damageFollowUpEvents,
+    monsterEffectEvents,
+    reactiveStatusResult,
+  };
+}
+
+function runEnemyTurnEnd(state) {
+  const enemyStatus = resolveTriggeredStatuses(
+    state,
+    'enemy',
+    StatusTrigger.ENEMY_TURN_END,
+  );
+  state.enemy = enemyStatus.unit;
+  const passive = runMonsterPassivePhase(state, MonsterSkillTrigger.ENEMY_TURN_END);
+  return { enemyStatus, passive };
+}
+
+function endRound(state) {
+  const playerStatus = resolveTriggeredStatuses(state, 'player', StatusTrigger.ROUND_END);
+  state.player = playerStatus.unit;
+  const enemyStatus = resolveTriggeredStatuses(state, 'enemy', StatusTrigger.ROUND_END);
+  state.enemy = enemyStatus.unit;
+  const equipment = runEquipmentPhase(state, ItemEffectTrigger.ROUND_END);
+  const playerPassive = runPlayerPassivePhase(state, PassiveSkillTrigger.ROUND_END);
+  const enemyPassive = runMonsterPassivePhase(state, MonsterSkillTrigger.ROUND_END);
+  // ROUND_END 的效果可直接結束戰鬥；此時不可再扣 duration、清除資源或
+  // 開始下一個 Round。
+  if (state.player.hp === 0 || state.enemy.hp === 0) {
+    return {
+      playerStatus,
+      enemyStatus,
+      equipment,
+      playerPassive,
+      enemyPassive,
+      discardedResources: { action: 0, armor: 0, mana: 0 },
+      retainedArmor: state.resources.armor,
+    };
+  }
+  state.player = advanceStatusDurations(state.player);
+  state.enemy = advanceStatusDurations(state.enemy);
+  const discardedResources = clearTurnResources(state, { preserveBetweenTurns: true });
+  const retainedArmor = state.resources.armor;
+  state.stunned = false;
+  return {
+    playerStatus,
+    enemyStatus,
+    equipment,
+    playerPassive,
+    enemyPassive,
+    discardedResources,
+    retainedArmor,
+  };
+}
+
+function runEquipmentPhase(state, trigger) {
+  const events = applyTriggeredEquipmentEffects(
+    state,
+    trigger,
+    { healAmountResolver: (amount) => healingAmount(state.player, amount) },
+  );
+  return [...events, ...applyHealingEquipmentBonus(state, events)];
+}
+
+function runPlayerPassivePhase(state, trigger) {
+  const result = resolvePassiveSkillEffects(state.player, trigger, {
+    resources: state.resources,
+    sealedSkillIds: state.combatModifiers.sealedSkillIds,
+  });
+  state.resources = result.context.resources ?? state.resources;
+  return result.events;
+}
+
+function runMonsterPassivePhase(state, trigger, { rng = Math.random } = {}) {
+  const effects = monsterPassiveEffects(state.enemy, trigger);
+  return applyMonsterEffects(state, effects, { rng });
+}
+
+function finishIfDefeated(state) {
+  if (state.enemy.hp === 0) {
+    awaitCombatVictoryConfirmation(state);
+    return true;
+  }
+  if (state.player.hp === 0) {
+    finishRun(state, GameStatus.LOST, state.enemy.name);
+    return true;
+  }
+  return false;
+}
+
+function recordTurnResolution(state, {
+  resolvedRound,
+  wasStunned,
+  discardedAction,
+  playerTurnEnd = {},
+  enemyTurnStart = {},
+  enemyAction = {},
+  enemyTurnEnd = {},
+  roundEnd = {},
+  roundStart = {},
+  playerTurnStart = {},
+  phaseOrder = [],
+}) {
+  const intent = enemyAction.intent ?? state.enemy.intent ?? {};
+  const discardedResources = roundEnd.discardedResources ?? { mana: 0 };
+  state.lastResolution = {
+    round: resolvedRound,
+    phaseOrder,
+    stunned: wasStunned,
+    discardedAction,
+    discardedMana: discardedResources.mana ?? 0,
+    armorBroken: enemyAction.armorBroken ?? false,
+    armorUsed: enemyAction.armorUsed ?? 0,
+    retainedArmor: roundEnd.retainedArmor ?? state.resources.armor,
+    enemyAction: {
+      type: intent.type,
+      name: intent.name,
+      skillId: intent.skillId,
+    },
+    enemyAttack: intent.damage ?? 0,
+    bossAttack: intent.damage ?? 0,
+    passiveSkillEvents: enemyAction.passiveSkillResolution?.events ?? [],
+    passiveDamageBlocked: enemyAction.passiveDamageBlocked ?? 0,
+    passiveManaSpent: enemyAction.passiveManaSpent ?? 0,
+    manaArmorBlocked: enemyAction.passiveDamageBlocked ?? 0,
+    manaSpent: enemyAction.passiveManaSpent ?? 0,
+    damageTaken: enemyAction.damageTaken ?? 0,
+    enemyAttackDamageEvent: enemyAction.enemyAttackDamageEvent ?? null,
+    monsterEffectEvents: enemyAction.monsterEffectEvents ?? [],
+    afterEnemyAttackStatusEvents: enemyAction.reactiveStatusResult?.events ?? [],
+    damageFollowUpEvents: enemyAction.damageFollowUpEvents ?? [],
+    afterEnemyAttackEquipmentEvents: [],
+    enemyStatusEvents: [
+      ...(enemyTurnStart.enemyStatus?.events ?? []),
+      ...(enemyTurnEnd.enemyStatus?.events ?? []),
+      ...(roundEnd.enemyStatus?.events ?? []),
+      ...(roundStart.enemyStatus?.events ?? []),
+    ],
+    playerStatusEvents: [
+      ...(playerTurnEnd.playerStatus?.events ?? []),
+      ...(enemyAction.reactiveStatusResult?.events ?? []),
+      ...(roundEnd.playerStatus?.events ?? []),
+      ...(roundStart.playerStatus?.events ?? []),
+      ...(playerTurnStart.playerStatus?.events ?? []),
+    ],
+    playerEquipmentEvents: [
+      ...(playerTurnEnd.healing ?? []),
+      ...(playerTurnEnd.equipment ?? []),
+      ...(enemyAction.damageFollowUpEvents ?? []),
+      ...(roundEnd.equipment ?? []),
+      ...(roundStart.equipment ?? []),
+      ...(playerTurnStart.healing ?? []),
+      ...(playerTurnStart.equipment ?? []),
+    ],
+  };
+  state.history.push({ type: 'turn-resolution', ...structuredClone(state.lastResolution) });
 }
 
 export function chooseReward(
@@ -1800,7 +2170,8 @@ export function upgradeGameState(value) {
     return next;
   }
 
-  if (next.schemaVersion === 5 || next.schemaVersion === 6) {
+  if (next.schemaVersion === 5 || next.schemaVersion === 6 || next.schemaVersion === 7) {
+    migrateRoundLifecycleState(next);
     next.schemaVersion = GAME_STATE_VERSION;
     ensureCurrentFields(next);
     return next;
@@ -1808,6 +2179,7 @@ export function upgradeGameState(value) {
 
   if (next.schemaVersion === 3 || next.schemaVersion === 4) {
     migratePreItemExpansionState(next);
+    migrateRoundLifecycleState(next);
     next.schemaVersion = GAME_STATE_VERSION;
     ensureCurrentFields(next);
     if (next.endSummary?.finalSkillIds) {
@@ -1819,6 +2191,12 @@ export function upgradeGameState(value) {
   }
 
   return upgradeLegacyState(next);
+}
+
+function migrateRoundLifecycleState(state) {
+  // v7 以前會在玩家操作期間預先儲存下一次怪物 intent。新版必須在
+  // ENEMY_TURN_START 後才決定，所以升級中的戰鬥一律清除舊預告。
+  if (state.enemy) state.enemy.intent = null;
 }
 
 function startNextNode(state, {
@@ -1882,13 +2260,8 @@ function startNextNode(state, {
 
   state.phase = GamePhase.PLAYER_TURN;
   state.enemy = node.enemy;
-  state.enemy.intent = selectMonsterIntent(state.enemy, { rng: monsterRng });
-  state.round = 1;
-  state.resources.action = playerActionLimit(state);
   activatePendingSkillSeals(state);
   activatePendingBattleStatuses(state);
-  applyBattleStartEquipmentEffects(state);
-  applyPlayerTurnStartEquipmentEffects(state);
   state.history.push({
     type: 'combat-started',
     unitId: state.enemy.unitId,
@@ -1896,6 +2269,7 @@ function startNextNode(state, {
     regionDepth: state.adventure.regionDepth,
     bossChance: node.bossChance,
   });
+  beginBattle(state, { monsterRng });
 }
 
 function startEventCombat(state, outcome, { rng, monsterRng }) {
@@ -1915,20 +2289,15 @@ function startEventCombat(state, outcome, { rng, monsterRng }) {
   state.event = null;
   state.phase = GamePhase.PLAYER_TURN;
   state.enemy = enemy;
-  state.enemy.intent = selectMonsterIntent(state.enemy, { rng: monsterRng });
   state.rewardChoices = [];
   state.lastCombatReward = null;
-  state.round = 1;
   clearTurnResources(state);
   state.combatModifiers = createCombatModifiers();
-  state.resources.action = playerActionLimit(state);
   clearCombatPresentation(state);
   state.player.activeStatuses = [];
   state.stunned = false;
   activatePendingSkillSeals(state);
   activatePendingBattleStatuses(state);
-  applyBattleStartEquipmentEffects(state);
-  applyPlayerTurnStartEquipmentEffects(state);
   state.lastAction = { type: 'event', text: outcome.text };
   state.history.push({
     type: 'event-combat-started',
@@ -1936,6 +2305,25 @@ function startEventCombat(state, outcome, { rng, monsterRng }) {
     unitId: state.enemy.unitId,
     rank: state.enemy.rank,
   });
+  beginBattle(state, { monsterRng });
+}
+
+function beginBattle(state, { monsterRng = Math.random } = {}) {
+  state.phase = GamePhase.PLAYER_TURN;
+  state.round = 1;
+  state.enemy.intent = null;
+  const playerStatus = resolveTriggeredStatuses(state, 'player', StatusTrigger.BATTLE_START);
+  state.player = playerStatus.unit;
+  const enemyStatus = resolveTriggeredStatuses(state, 'enemy', StatusTrigger.BATTLE_START);
+  state.enemy = enemyStatus.unit;
+  applyBattleStartEquipmentEffects(state);
+  runPlayerPassivePhase(state, PassiveSkillTrigger.BATTLE_START);
+  runMonsterPassivePhase(state, MonsterSkillTrigger.BATTLE_START, { rng: monsterRng });
+  if (finishIfDefeated(state)) return;
+  beginRound(state, { monsterRng });
+  if (finishIfDefeated(state)) return;
+  beginPlayerTurn(state);
+  finishIfDefeated(state);
 }
 
 function randomPendingSkillSealId(player, rng) {
@@ -1974,12 +2362,9 @@ function activatePendingBattleStatuses(state) {
 
 function awaitCombatVictoryConfirmation(state) {
   if (state.phase !== GamePhase.PLAYER_TURN) return;
-  const battleEndEvents = applyTriggeredEquipmentEffects(
-    state,
-    ItemEffectTrigger.BATTLE_END,
-    { healAmountResolver: (amount) => healingAmount(state.player, amount) },
-  );
-  const battleEndHealingEvents = applyHealingEquipmentBonus(state, battleEndEvents);
+  const battleEnd = runBattleEndPhase(state);
+  const battleEndEvents = battleEnd.equipment;
+  const battleEndHealingEvents = [];
   if (battleEndEvents.length > 0 || battleEndHealingEvents.length > 0) {
     state.history.push({
       type: 'equipment-battle-end',
@@ -1997,6 +2382,17 @@ function awaitCombatVictoryConfirmation(state) {
     && region.encounterRules.boss.restorePlayerHpAfterVictory;
   // BOSS 勝利回復是地區規則，不視為一般治療事件，因此不觸發頌缽等治療裝備。
   if (shouldRestoreHp) state.player.hp = state.player.maxHp;
+}
+
+function runBattleEndPhase(state) {
+  const playerStatus = resolveTriggeredStatuses(state, 'player', StatusTrigger.BATTLE_END);
+  state.player = playerStatus.unit;
+  const enemyStatus = resolveTriggeredStatuses(state, 'enemy', StatusTrigger.BATTLE_END);
+  state.enemy = enemyStatus.unit;
+  const equipment = runEquipmentPhase(state, ItemEffectTrigger.BATTLE_END);
+  const playerPassive = runPlayerPassivePhase(state, PassiveSkillTrigger.BATTLE_END);
+  const enemyPassive = runMonsterPassivePhase(state, MonsterSkillTrigger.BATTLE_END);
+  return { playerStatus, enemyStatus, equipment, playerPassive, enemyPassive };
 }
 
 function finishCombatVictory(state, { rewardRng }) {
@@ -2032,6 +2428,9 @@ function finishCombatVictory(state, { rewardRng }) {
 }
 
 function finishRun(state, status, defeatedBy) {
+  // 戰敗與放棄同樣是戰鬥結束；若正處於非戰鬥畫面，則沒有 BATTLE_END
+  // 的目標可供結算，直接保留既有結束流程。
+  if (state.enemy) runBattleEndPhase(state);
   const finalSkillIds = [...(state.player.skillIds ?? [])];
   const finalSkillLevels = structuredClone(state.player.skillLevels ?? {});
   const finalEquipmentIds = equippedItemIds(state.player);
@@ -2940,7 +3339,7 @@ function resolveTriggeredStatuses(state, targetKey, trigger) {
   const events = [];
   for (const active of next.activeStatuses ?? []) {
     const definition = getStatus(active.statusId);
-    if (definition.trigger !== trigger) continue;
+    if (!statusMatchesPhase(definition.trigger, trigger)) continue;
     const requested = Number(definition.effect.amountPerPotency ?? 0)
       * Number(active.potency ?? 1)
       * Number(active.stacks ?? 1);
@@ -3004,6 +3403,22 @@ function resolveTriggeredStatuses(state, targetKey, trigger) {
   next.activeStatuses = (next.activeStatuses ?? [])
     .filter((status) => Number(status.stacks ?? 1) > 0);
   return { unit: state[targetKey], events };
+}
+
+/**
+ * TURN_START / TURN_END 是舊資料的模糊 Trigger。為了不讓燃燒、再生等
+ * 已上線內容失效，暫時映射到各自持有者的明確 Turn 階段；新資料不應使用它們。
+ */
+function statusMatchesPhase(definedTrigger, requestedTrigger) {
+  if (definedTrigger === requestedTrigger) return true;
+  return (
+    (definedTrigger === StatusTrigger.TURN_START
+      && (requestedTrigger === StatusTrigger.PLAYER_TURN_START
+        || requestedTrigger === StatusTrigger.ENEMY_TURN_START))
+    || (definedTrigger === StatusTrigger.TURN_END
+      && (requestedTrigger === StatusTrigger.PLAYER_TURN_END
+        || requestedTrigger === StatusTrigger.ENEMY_TURN_END))
+  );
 }
 
 function wouldOnlyHealFullHealth(source, player) {
@@ -3149,11 +3564,12 @@ function resetUnitArmorToBaseDefense(unit) {
   unit.armor = Math.max(0, Number(unit.baseDefense ?? 0));
 }
 
-function resetPlayerArmorToBaseDefense(state) {
+function resetPlayerRoundArmor(state) {
   const baseDefense = Math.max(0, Number(state.player.baseDefense ?? 0));
-  // 玩家現有的「金剛石」等裝備可明確保留護甲；沒有基礎防禦力時，
-  // 不覆寫這類既有的特殊保留效果。日後取得 baseDefense 時則依本系統重設。
-  if (baseDefense > 0) state.resources.armor = baseDefense;
+  const retainedArmor = Math.max(0, Number(state.resources.armor ?? 0));
+  // 護甲跨 Round 保留先由 ROUND_END 的裝備比例算出；baseDefense 是每個
+  // ROUND_START 額外產生的固定護甲，因此兩者必須直接疊加。
+  state.resources.armor = retainedArmor + baseDefense;
 }
 
 function ensureCurrentFields(state) {
@@ -3218,14 +3634,7 @@ function ensureCurrentFields(state) {
     );
     state.enemy.armor = Math.max(0, Number(state.enemy.armor ?? 0));
     state.enemy.activeStatuses ??= [];
-    state.enemy.intent ??= {
-      type: 'basic-attack',
-      name: '普通攻擊',
-      skillId: null,
-      power: 1,
-      damage: state.enemy.baseDamage,
-      effects: [],
-    };
+    state.enemy.intent ??= null;
   }
 }
 
@@ -3284,14 +3693,7 @@ function upgradeLegacyState(legacy) {
       ),
       activeStatuses: structuredClone(legacyBoss.activeStatuses ?? []),
     };
-    next.enemy.intent = {
-      type: 'basic-attack',
-      name: '普通攻擊',
-      skillId: null,
-      power: 1,
-      damage: next.enemy.baseDamage,
-      effects: [],
-    };
+    next.enemy.intent = null;
   } else {
     next.enemy = null;
   }

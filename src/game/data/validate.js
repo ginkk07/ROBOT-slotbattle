@@ -11,6 +11,7 @@ import { MONSTER_ACTION_RULES } from './monster-actions.js';
 import {
   MONSTER_SKILLS,
   MonsterSkillActivation,
+  MonsterSkillTrigger,
 } from './monster-skills.js';
 import { PLAYER_PROGRESSION_RULES } from './player-progression.js';
 import { ContentRarity, EventRarity } from './rarities.js';
@@ -68,6 +69,13 @@ export function validateGameData() {
   for (const skill of Object.values(MONSTER_SKILLS)) {
     if (!Object.values(MonsterSkillActivation).includes(skill.activation)) {
       errors.push(`怪物技能 ${skill.id} 的 activation 不合法：${skill.activation}`);
+    }
+    if (
+      skill.activation === MonsterSkillActivation.PASSIVE
+      && skill.trigger !== undefined
+      && !Object.values(MonsterSkillTrigger).includes(skill.trigger)
+    ) {
+      errors.push(`怪物被動 ${skill.id} 的 trigger 不合法：${skill.trigger}`);
     }
   }
 
