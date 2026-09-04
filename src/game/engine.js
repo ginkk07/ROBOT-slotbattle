@@ -69,10 +69,13 @@ import {
 } from './engines/loot-engine.js';
 import {
   monsterPassiveEffects,
+  resolveMonsterAttackPassives,
   resolveMonsterIntent,
   selectMonsterIntent,
 } from './engines/monster-action-engine.js';
 import { MonsterSkillTrigger } from './data/monster-skills.js';
+import { AttackTrigger } from './data/attack-triggers.js';
+import { resolveAttack } from './engines/attack-engine.js';
 import { resolvePassiveSkillEffects } from './engines/passive-skill-engine.js';
 import {
   grantSkillReward,
@@ -97,7 +100,7 @@ import { drawReels, resolveSymbolChances } from './random.js';
 import { scoreSpin } from './scoring.js';
 import { SYMBOL_META, SymbolId } from './symbols.js';
 
-export const GAME_STATE_VERSION = 8;
+export const GAME_STATE_VERSION = 9;
 
 export const GameStatus = Object.freeze({
   ACTIVE: 'active',
@@ -155,7 +158,10 @@ export function createGame({
       tags: [...playerUnit.tags],
       hp: config.playerMaxHp,
       maxHp: config.playerMaxHp,
+      baseDamage: Math.max(0, Number(playerUnit.stats.baseDamage ?? 0)),
       baseDefense: Math.max(0, Number(playerUnit.stats.baseDefense ?? 0)),
+      pendingBaseDamage: 0,
+      pendingBaseDefense: 0,
       gold: 0,
       skillIds: selectedSkillIds,
       skillLevels: Object.fromEntries(selectedSkillIds.map((skillId) => [skillId, 1])),
@@ -266,20 +272,44 @@ export function placeBet(
       * damageModifiers.multiplier,
     )
     : 0;
-  const enemyArmorBroken = requestedAttack > 0 && !damageModifiers.ignoreArmor
-    ? removeArmorBeforeUnitTakesDamage(next.enemy)
-    : 0;
-  const attackEvent = dealDamageToEnemy(
-    next,
-    requestedAttack,
-    'physical',
-    DamageSource.SPIN,
-    {
-      deferFollowUps: true,
-      ignoreArmor: damageModifiers.ignoreArmor,
-    },
-  );
-  if (attackEvent) attackEvent.armorBroken = enemyArmorBroken;
+  const playerAttack = requestedAttack > 0
+    ? resolveAttack({
+      attackId: 'spin',
+      damageSource: DamageSource.SPIN,
+      attackerKey: 'player',
+      targetKey: 'enemy',
+      totalHits: 1,
+      getState: () => next,
+      getArmor: attackTargetArmor,
+      runTrigger: (trigger, context) => resolvePlayerAttackTriggerEffects(next, context, trigger),
+      resolveHit: () => {
+        const enemyArmorBroken = !damageModifiers.ignoreArmor
+          ? removeArmorBeforeUnitTakesDamage(next.enemy)
+          : 0;
+        const event = dealDamageToEnemy(
+          next,
+          requestedAttack,
+          'physical',
+          DamageSource.SPIN,
+          {
+            deferFollowUps: true,
+            ignoreArmor: damageModifiers.ignoreArmor,
+          },
+        );
+        if (event) event.armorBroken = enemyArmorBroken;
+        return {
+          requestedDamage: requestedAttack,
+          actualHpDamage: event?.amount ?? 0,
+          armorDamage: event?.armorUsed ?? 0,
+          armorBroken: enemyArmorBroken,
+          armorUsed: event?.armorUsed ?? 0,
+          damageEvent: event,
+        };
+      },
+    })
+    : { events: [], hitResults: [] };
+  const attackEvent = playerAttack.hitResults[0]?.damageEvent ?? null;
+  const enemyArmorBroken = playerAttack.hitResults[0]?.armorBroken ?? 0;
   const spinDamage = attackEvent?.amount ?? 0;
 
   // 額外傷害逐筆獨立結算，不進入強擊或賭徒左手倍率。
@@ -473,6 +503,7 @@ export function placeBet(
     ...followUpDamageEvents,
     ...stunEvents.filter((event) => !event.itemId),
   ];
+  next.history.at(-1).attackEvents = playerAttack.events;
 
   if (next.player.hp === 0) {
     finishRun(next, GameStatus.LOST, next.enemy.name);
@@ -904,6 +935,8 @@ function beginRound(state, { monsterRng = Math.random } = {}) {
   state.combatModifiers.damageDealtBySource = createDamageSourceTotals();
   state.combatModifiers.usedTurnEquipmentEffects = {};
   state.resources.action = playerActionLimit(state);
+  applyPendingBaseStats(state.player);
+  applyPendingBaseStats(state.enemy);
   resetPlayerRoundArmor(state);
   resetUnitArmorToBaseDefense(state.enemy);
 
@@ -965,6 +998,45 @@ function beginEnemyTurn(state, { monsterRng }) {
 
 function resolveEnemyTurn(state, { monsterRng }) {
   const intent = resolveMonsterIntent(state.enemy, state.enemy.intent);
+  const attack = resolveAttack({
+    attackId: intent.skillId ?? intent.type,
+    damageSource: 'enemy-attack',
+    attackerKey: 'enemy',
+    targetKey: 'player',
+    totalHits: Math.max(1, Math.floor(Number(intent.hitCount ?? 1))),
+    getState: () => state,
+    getArmor: attackTargetArmor,
+    runTrigger: (trigger, context) => resolveAttackTriggerEffects(
+      state,
+      context,
+      trigger,
+      { intent, rng: monsterRng },
+    ),
+    resolveHit: (context) => resolveEnemyAttackHit(state, intent, context),
+  });
+  const reactiveStatusResult = state.player.hp > 0 && state.enemy.hp > 0
+    ? resolveAfterEnemyAttackStatuses(state.player, state.enemy, { rng: monsterRng })
+    : { holder: state.player, attacker: state.enemy, events: [] };
+  state.player = reactiveStatusResult.holder;
+  state.enemy = reactiveStatusResult.attacker;
+  const firstHit = attack.hitResults[0] ?? {};
+  return {
+    intent,
+    attack,
+    armorBroken: firstHit.armorBroken ?? 0,
+    armorUsed: firstHit.armorUsed ?? 0,
+    passiveSkillResolution: firstHit.passiveSkillResolution ?? { events: [] },
+    passiveDamageBlocked: firstHit.passiveDamageBlocked ?? 0,
+    passiveManaSpent: firstHit.passiveManaSpent ?? 0,
+    damageTaken: attack.hitResults.reduce((sum, hit) => sum + (hit.actualHpDamage ?? 0), 0),
+    enemyAttackDamageEvent: firstHit.enemyAttackDamageEvent ?? null,
+    damageFollowUpEvents: attack.hitResults.flatMap((hit) => hit.damageFollowUpEvents ?? []),
+    monsterEffectEvents: attack.events,
+    reactiveStatusResult,
+  };
+}
+
+function resolveEnemyAttackHit(state, intent, context) {
   const armorBroken = removeArmorBeforeIncomingDamage(state);
   const armorUsed = Math.min(state.resources.armor, intent.damage);
   state.resources.armor = Math.max(0, state.resources.armor - armorUsed);
@@ -1012,16 +1084,10 @@ function resolveEnemyTurn(state, { monsterRng }) {
     amount: damageTaken,
     damageSource: DamageSource.EXTRA,
   });
-  const monsterEffectEvents = state.player.hp > 0 && state.enemy.hp > 0
-    ? applyMonsterEffects(state, intent.effects, { rng: monsterRng })
-    : [];
-  const reactiveStatusResult = state.player.hp > 0 && state.enemy.hp > 0
-    ? resolveAfterEnemyAttackStatuses(state.player, state.enemy, { rng: monsterRng })
-    : { holder: state.player, attacker: state.enemy, events: [] };
-  state.player = reactiveStatusResult.holder;
-  state.enemy = reactiveStatusResult.attacker;
   return {
-    intent,
+    requestedDamage: intent.damage,
+    actualHpDamage: damageTaken,
+    armorDamage: armorUsed,
     armorBroken,
     armorUsed,
     passiveSkillResolution,
@@ -1030,9 +1096,48 @@ function resolveEnemyTurn(state, { monsterRng }) {
     damageTaken,
     enemyAttackDamageEvent,
     damageFollowUpEvents,
-    monsterEffectEvents,
-    reactiveStatusResult,
+    targetHpAfter: state.player.hp,
+    armorAfter: state.resources.armor,
+    hitIndex: context.hitIndex,
   };
+}
+
+function attackTargetArmor(state, targetKey) {
+  return targetKey === 'player'
+    ? Math.max(0, Number(state.resources.armor ?? 0))
+    : Math.max(0, Number(state[targetKey]?.armor ?? 0));
+}
+
+function resolveAttackTriggerEffects(state, context, trigger, { intent, rng }) {
+  const events = [];
+  if (context.attackerKey === 'enemy') {
+    events.push(...resolveMonsterAttackPassives(state, context, trigger, attackTargetArmor));
+  }
+  // 主動攻擊技能的附帶效果也只能由 Attack/Hit 階段啟動；破甲攻擊使用
+  // AFTER_ATTACK_HIT，因此與一般的額外／狀態傷害不會混用。
+  if (
+    context.attackerKey === 'enemy'
+    && trigger === AttackTrigger.AFTER_ATTACK_HIT
+    && state.player.hp > 0
+    && state.enemy.hp > 0
+  ) {
+    const effects = (intent.effects ?? []).filter((effect) => (
+      effect.attackTrigger === AttackTrigger.AFTER_ATTACK_HIT
+    ));
+    events.push(...applyMonsterEffects(state, effects, { rng }));
+  }
+  return events;
+}
+
+/** 玩家目前沒有 Attack Trigger 被動；仍經由同一入口，讓未來新增時不必修改 Attack 引擎。 */
+function resolvePlayerAttackTriggerEffects(state, context, trigger) {
+  const result = resolvePassiveSkillEffects(state.player, trigger, {
+    resources: state.resources,
+    sealedSkillIds: state.combatModifiers.sealedSkillIds,
+    attack: context,
+  });
+  state.resources = result.context.resources ?? state.resources;
+  return result.events;
 }
 
 function runEnemyTurnEnd(state) {
@@ -2166,6 +2271,12 @@ export function isStunned(state) {
 export function upgradeGameState(value) {
   const next = structuredClone(value);
   if (next.schemaVersion === GAME_STATE_VERSION) {
+    ensureCurrentFields(next);
+    return next;
+  }
+
+  if (next.schemaVersion === 8) {
+    next.schemaVersion = GAME_STATE_VERSION;
     ensureCurrentFields(next);
     return next;
   }
@@ -3553,6 +3664,12 @@ function applyEnemyOverrides(enemy, overrides) {
     enemy.baseDefense = Math.max(0, Number(overrides.baseDefense));
     enemy.armor = enemy.baseDefense;
   }
+  if (overrides.pendingBaseDamage !== undefined) {
+    enemy.pendingBaseDamage = Math.max(0, Number(overrides.pendingBaseDamage));
+  }
+  if (overrides.pendingBaseDefense !== undefined) {
+    enemy.pendingBaseDefense = Math.max(0, Number(overrides.pendingBaseDefense));
+  }
   if (overrides.armor !== undefined) enemy.armor = Math.max(0, Number(overrides.armor));
   if (overrides.damageResistances) {
     enemy.damageResistances = structuredClone(overrides.damageResistances);
@@ -3562,6 +3679,17 @@ function applyEnemyOverrides(enemy, overrides) {
 
 function resetUnitArmorToBaseDefense(unit) {
   unit.armor = Math.max(0, Number(unit.baseDefense ?? 0));
+}
+
+/** 把上一 Round 累積的基礎能力成長套入本 Round，並立即清空 pending。 */
+function applyPendingBaseStats(unit) {
+  if (!unit) return;
+  const pendingBaseDamage = Math.max(0, Number(unit.pendingBaseDamage ?? 0));
+  const pendingBaseDefense = Math.max(0, Number(unit.pendingBaseDefense ?? 0));
+  unit.baseDamage = Math.max(0, Number(unit.baseDamage ?? 0)) + pendingBaseDamage;
+  unit.baseDefense = Math.max(0, Number(unit.baseDefense ?? 0)) + pendingBaseDefense;
+  unit.pendingBaseDamage = 0;
+  unit.pendingBaseDefense = 0;
 }
 
 function resetPlayerRoundArmor(state) {
@@ -3575,10 +3703,16 @@ function resetPlayerRoundArmor(state) {
 function ensureCurrentFields(state) {
   state.player = normalizePlayerSkills(state.player);
   const playerUnit = getUnit(state.player.unitId ?? 'wanderer');
+  state.player.baseDamage = Math.max(
+    0,
+    Number(state.player.baseDamage ?? playerUnit.stats.baseDamage ?? 0),
+  );
   state.player.baseDefense = Math.max(
     0,
     Number(state.player.baseDefense ?? playerUnit.stats.baseDefense ?? 0),
   );
+  state.player.pendingBaseDamage = Math.max(0, Number(state.player.pendingBaseDamage ?? 0));
+  state.player.pendingBaseDefense = Math.max(0, Number(state.player.pendingBaseDefense ?? 0));
   state.player.gold = Math.max(0, Math.floor(Number(state.player.gold ?? 0)));
   state.player.activeStatuses ??= [];
   state.player.pendingSealedSkillIds ??= [];
@@ -3633,6 +3767,8 @@ function ensureCurrentFields(state) {
       Number(state.enemy.baseDefense ?? enemyUnit.stats.baseDefense ?? 0),
     );
     state.enemy.armor = Math.max(0, Number(state.enemy.armor ?? 0));
+    state.enemy.pendingBaseDamage = Math.max(0, Number(state.enemy.pendingBaseDamage ?? 0));
+    state.enemy.pendingBaseDefense = Math.max(0, Number(state.enemy.pendingBaseDefense ?? 0));
     state.enemy.activeStatuses ??= [];
     state.enemy.intent ??= null;
   }

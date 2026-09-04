@@ -9,6 +9,20 @@ export const UnitRank = Object.freeze({
 
 export const UNITS = createCatalog([
   {
+    id: 'iron-beast',
+    name: '鐵甲獸',
+    rank: UnitRank.NORMAL,
+    tags: ['enemy', 'beast', 'ruins', 'armored'],
+    stats: { maxHp: 45, baseDamage: 6, baseDefense: 0, actionPoints: 0 },
+    // 鐵甲獸只有食鐵被動；怪物回合固定使用普通攻擊。
+    skillIds: ['iron-eating'],
+    requiredActiveSkillCount: 0,
+    damageResistances: {},
+    statusOverrides: {},
+    lootTableId: 'ruins-common-loot',
+    encounterWeight: 12,
+  },
+  {
     id: 'wanderer',
     name: '冒險者',
     rank: UnitRank.PLAYER,
@@ -54,7 +68,7 @@ export const UNITS = createCatalog([
     name: '寶箱怪',
     rank: UnitRank.ELITE,
     tags: ['enemy', 'elite', 'mimic', 'construct', 'ruins', 'armored', 'event-only'],
-    stats: { maxHp: 75, baseDamage: 12, baseDefense: 0, actionPoints: 0 },
+    stats: { maxHp: 55, baseDamage: 12, baseDefense: 0, actionPoints: 0 },
     skillIds: ['armor-breaking-strike', 'armor-reinforcement'],
     requiredActiveSkillCount: 1,
     damageResistances: {},

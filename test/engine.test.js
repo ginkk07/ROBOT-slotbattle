@@ -88,7 +88,7 @@ function eventState(eventId, skillIds = ['power-strike']) {
 
 test('新戰鬥取得4點行動點，護甲與法力從0開始', () => {
   const state = game();
-  assert.equal(state.schemaVersion, 8);
+  assert.equal(state.schemaVersion, 9);
   assert.equal(state.phase, GamePhase.PLAYER_TURN);
   assert.deepEqual(state.resources, { action: 4, armor: 0, mana: 0 });
   assert.equal(state.enemy.baseDefense, 0);
@@ -122,6 +122,43 @@ test('怪物基礎防禦力會在每個 ROUND_START 重設護甲，不會累加'
   state = endPlayerTurn(state, { monsterRng: zero });
   assert.equal(state.enemy.baseDefense, 5);
   assert.equal(state.enemy.armor, 5);
+});
+
+test('鐵甲獸的食鐵在下一個 ROUND_START 同時套用攻擊、防禦並立刻形成護甲', () => {
+  let state = game({
+    initialEnemyUnitId: 'iron-beast',
+    enemy: { maxHp: 45, baseDamage: 6, baseDefense: 0 },
+  });
+  state.resources.armor = 30;
+
+  state = endPlayerTurn(state, { monsterRng: zero });
+
+  const ironEating = state.lastResolution.monsterEffectEvents.find((event) => (
+    event.skillId === 'iron-eating'
+  ));
+  assert.equal(ironEating.gain, 6);
+  assert.equal(ironEating.appliesAt, 'next-round-start');
+  assert.equal(state.enemy.baseDamage, 12);
+  assert.equal(state.enemy.baseDefense, 6);
+  assert.equal(state.enemy.pendingBaseDamage, 0);
+  assert.equal(state.enemy.pendingBaseDefense, 0);
+  assert.equal(state.enemy.armor, 6);
+});
+
+test('schema v8 存檔補上通用 pending 基礎能力欄位', () => {
+  const legacy = game();
+  legacy.schemaVersion = 8;
+  delete legacy.player.pendingBaseDamage;
+  delete legacy.player.pendingBaseDefense;
+  delete legacy.enemy.pendingBaseDamage;
+  delete legacy.enemy.pendingBaseDefense;
+
+  const upgraded = upgradeGameState(legacy);
+  assert.equal(upgraded.schemaVersion, 9);
+  assert.equal(upgraded.player.pendingBaseDamage, 0);
+  assert.equal(upgraded.player.pendingBaseDefense, 0);
+  assert.equal(upgraded.enemy.pendingBaseDamage, 0);
+  assert.equal(upgraded.enemy.pendingBaseDefense, 0);
 });
 
 test('第一個 Round 也會完成 ROUND_START 與 PLAYER_TURN_START', () => {
@@ -619,8 +656,11 @@ test('選擇Boss獎勵後換區，敵人生命與基礎傷害提高50%', () => {
   assert.equal(state.adventure.regionDepth, 2);
   assert.equal(state.adventure.regionProgress, 0);
   assert.equal(state.enemy.rank, 'normal');
-  assert.equal(state.enemy.maxHp, 45);
-  assert.equal(state.enemy.baseDamage, 12);
+  assert.equal(state.enemy.maxHp, Math.ceil(state.enemy.baseMaxHp * 1.5));
+  assert.equal(
+    state.enemy.baseDamage,
+    Math.ceil(state.enemy.baseDamageBeforeScaling * 1.5),
+  );
 });
 
 test('完成奇遇會增加地區進度並繼續下一次遭遇', () => {
@@ -835,11 +875,11 @@ test('華麗寶箱可取得物品或技能卷軸，60%分支會遭遇指定寶�
   let mimicState = eventState('ruins-ornate-chest');
   mimicState = chooseEventOption(mimicState, 'open', {
     eventRng: sequence([0.5]),
-    monsterRng: sequence([0.99, 0]),
+    monsterRng: sequence([0, 0.99, 0]),
   });
   assert.equal(mimicState.phase, GamePhase.PLAYER_TURN);
   assert.equal(mimicState.enemy.unitId, 'ruins-mimic');
-  assert.equal(mimicState.enemy.maxHp, 75);
+  assert.equal(mimicState.enemy.maxHp, 55);
   assert.equal(mimicState.enemy.baseDamage, 12);
   assert.equal(mimicState.enemy.intent.skillId, 'armor-breaking-strike');
 });
@@ -848,7 +888,7 @@ test('破甲攻擊附加2層裝甲破壞，無護甲時保留並在後續攻擊�
   let state = eventState('ruins-ornate-chest');
   state = chooseEventOption(state, 'open', {
     eventRng: sequence([0.5]),
-    monsterRng: sequence([0.99, 0]),
+    monsterRng: sequence([0, 0.99, 0]),
   });
   state.resources.armor = 0;
   state = endPlayerTurn(state, {
@@ -859,14 +899,24 @@ test('破甲攻擊附加2層裝甲破壞，無護甲時保留並在後續攻擊�
   assert.equal(state.lastResolution.damageTaken, 12);
   assert.equal(state.player.activeStatuses[0].statusId, 'armor-break');
   assert.equal(state.player.activeStatuses[0].stacks, 2);
+  assert.ok(state.lastResolution.monsterEffectEvents.some((event) => (
+    event.type === 'apply-status' && event.statusId === 'armor-break'
+  )));
 
   state.resources.armor = 0;
   state = endPlayerTurn(state, {
     monsterRng: sequence([0.5, 0, 0]),
   });
   assert.equal(state.lastResolution.armorBroken, 0);
+  // 本回合的預告已在上一個 ROUND_START 決定為普通攻擊；下一輪才預告破甲。
+  assert.equal(state.player.activeStatuses[0].stacks, 2);
+
+  state.resources.armor = 0;
+  state = endPlayerTurn(state, { monsterRng: zero });
+  assert.equal(state.lastResolution.armorBroken, 0);
   assert.equal(state.player.activeStatuses[0].stacks, 4);
 
+  state.player.hp = state.player.maxHp;
   state.resources.armor = 5;
   state = endPlayerTurn(state, {
     monsterRng: zero,
@@ -1111,7 +1161,7 @@ test('舊版Boss戰存檔會升級為冒險格式', () => {
   legacy.resources = { action: 1, attack: 6, defense: 3, skill: 2 };
   const upgraded = upgradeGameState(legacy);
 
-  assert.equal(upgraded.schemaVersion, 8);
+  assert.equal(upgraded.schemaVersion, 9);
   assert.equal(upgraded.enemy.hp, 54);
   assert.deepEqual(upgraded.resources, { action: 1, armor: 3, mana: 2 });
   assert.equal(upgraded.adventure.regionDepth, 1);

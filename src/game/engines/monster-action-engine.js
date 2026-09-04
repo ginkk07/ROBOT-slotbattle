@@ -1,6 +1,7 @@
 import {
   getMonsterSkill,
   MonsterSkillActivation,
+  MonsterPassiveEffectType,
   MonsterSkillTrigger,
 } from '../data/monster-skills.js';
 import { getMonsterActionRule } from '../data/monster-actions.js';
@@ -19,6 +20,7 @@ export function selectMonsterIntent(unit, { rng = Math.random } = {}) {
       name: '普通攻擊',
       skillId: null,
       power: 1,
+      hitCount: 1,
       damage: unit.baseDamage,
       effects: [],
     };
@@ -34,6 +36,7 @@ export function selectMonsterIntent(unit, { rng = Math.random } = {}) {
     name: skill.name,
     skillId: skill.id,
     power: skill.power,
+    hitCount: skill.hitCount ?? 1,
     damage: monsterSkillDamage(unit, skill.power),
     effects: structuredClone(skill.effects ?? []),
   };
@@ -49,6 +52,7 @@ export function resolveMonsterIntent(unit, intent) {
     ...intent,
     name: skill.name,
     power: skill.power,
+    hitCount: skill.hitCount ?? 1,
     damage: monsterSkillDamage(unit, skill.power),
     effects: structuredClone(skill.effects ?? []),
   };
@@ -66,6 +70,44 @@ export function monsterPassiveEffects(unit, trigger) {
       && (skill.trigger ?? MonsterSkillTrigger.BATTLE_START) === trigger
     ))
     .flatMap((skill) => structuredClone(skill.effects ?? []));
+}
+
+/** 供 Attack/Hit 引擎呼叫的怪物被動資料；不以技能 ID 分支。 */
+export function monsterAttackPassiveEntries(unit, trigger) {
+  return unit.skillIds
+    .map((skillId) => getMonsterSkill(skillId))
+    .filter((skill) => (
+      skill.activation === MonsterSkillActivation.PASSIVE
+      && skill.trigger === trigger
+    ))
+    .flatMap((skill) => (skill.passiveEffects ?? []).map((effect) => ({ skill, effect })));
+}
+
+export function resolveMonsterAttackPassives(state, context, trigger, getArmor) {
+  const attacker = state[context.attackerKey];
+  if (!attacker || context.attackerKey !== 'enemy') return [];
+  const events = [];
+  for (const { skill, effect } of monsterAttackPassiveEntries(attacker, trigger)) {
+    if (effect.type !== MonsterPassiveEffectType.GAIN_PENDING_BASE_STATS_FROM_TARGET_ARMOR) {
+      throw new RangeError(`尚未支援的怪物攻擊被動效果：${effect.type}`);
+    }
+    const armor = Math.max(0, Number(getArmor(state, context.targetKey) ?? 0));
+    const gain = Math.floor(armor / Math.max(1, Number(effect.armorPerGain ?? 5)));
+    if (gain <= 0) continue;
+    attacker.pendingBaseDamage = Math.max(0, Number(attacker.pendingBaseDamage ?? 0)) + gain;
+    attacker.pendingBaseDefense = Math.max(0, Number(attacker.pendingBaseDefense ?? 0)) + gain;
+    events.push({
+      type: effect.type,
+      trigger,
+      skillId: skill.id,
+      skillName: skill.name,
+      gain,
+      pendingBaseDamage: attacker.pendingBaseDamage,
+      pendingBaseDefense: attacker.pendingBaseDefense,
+      appliesAt: 'next-round-start',
+    });
+  }
+  return events;
 }
 
 function monsterSkillDamage(unit, skillMultiplier) {

@@ -1,4 +1,5 @@
 import { createCatalog, requireDefinition } from './catalog.js';
+import { AttackTrigger } from './attack-triggers.js';
 
 export const MonsterSkillActivation = Object.freeze({
   ACTIVE: 'active',
@@ -13,9 +14,25 @@ export const MonsterSkillTrigger = Object.freeze({
   ENEMY_TURN_END: 'enemy-turn-end',
   ROUND_END: 'round-end',
   BATTLE_END: 'battle-end',
+  ...AttackTrigger,
+});
+
+export const MonsterPassiveEffectType = Object.freeze({
+  GAIN_PENDING_BASE_STATS_FROM_TARGET_ARMOR: 'gain-pending-base-stats-from-target-armor',
 });
 
 export const MONSTER_SKILLS = createCatalog([
+  {
+    id: 'iron-eating',
+    name: '食鐵',
+    activation: MonsterSkillActivation.PASSIVE,
+    trigger: MonsterSkillTrigger.BEFORE_ATTACK_HIT,
+    description: '攻擊前依目標護甲累積下回合生效的攻擊與防禦。',
+    passiveEffects: [{
+      type: MonsterPassiveEffectType.GAIN_PENDING_BASE_STATS_FROM_TARGET_ARMOR,
+      armorPerGain: 5,
+    }],
+  },
   {
     id: 'armor-reinforcement',
     name: '護甲強化',
@@ -45,6 +62,7 @@ export const MONSTER_SKILLS = createCatalog([
     description: '造成基礎傷害100%的傷害，並使玩家獲得2層裝甲破壞。',
     effects: [{
       type: 'apply-status',
+      attackTrigger: AttackTrigger.AFTER_ATTACK_HIT,
       statusId: 'armor-break',
       target: 'enemy',
       chance: 1,

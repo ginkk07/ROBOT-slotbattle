@@ -1,4 +1,5 @@
 import { deepFreeze } from './catalog.js';
+import { AttackTrigger } from './attack-triggers.js';
 
 /** 玩家技能的使用方式；每筆技能資料都必須明確指定。 */
 export const SkillActivation = deepFreeze({
@@ -20,6 +21,7 @@ export const PassiveSkillTrigger = deepFreeze({
   ROUND_END: 'round-end',
   BATTLE_END: 'battle-end',
   BEFORE_DAMAGE_TAKEN: 'before-damage-taken',
+  ...AttackTrigger,
 });
 
 /**

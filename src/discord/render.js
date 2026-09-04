@@ -1,6 +1,10 @@
 import { ACHIEVEMENTS } from '../game/data/achievements.js';
 import { contentTypeEmoji } from '../game/data/content-types.js';
 import { getItem } from '../game/data/items.js';
+import {
+  MonsterSkillActivation,
+  getMonsterSkill,
+} from '../game/data/monster-skills.js';
 import { rarityLabel } from '../game/data/rarities.js';
 import { getRegion } from '../game/data/regions.js';
 import {
@@ -158,12 +162,17 @@ export function renderWagerModal(state) {
 
 function renderCombat(state) {
   const enemyArmor = Math.max(0, Number(state.enemy.armor ?? 0));
+  const enemyPassiveNames = state.enemy.skillIds
+    .map((skillId) => getMonsterSkill(skillId))
+    .filter((skill) => skill.activation === MonsterSkillActivation.PASSIVE)
+    .map((skill) => skill.name);
   const enemyField = {
     name: `👹 ${rankLabel(state.enemy.rank)}${state.enemy.name} HP　${state.enemy.hp}/${state.enemy.maxHp}${enemyArmor > 0 ? `　🛡️ ${enemyArmor}` : ''}`,
     value: [
       healthBar(state.enemy.hp, state.enemy.maxHp, '🟥'),
       '**敵人狀態**',
       statusListText(state.enemy.activeStatuses),
+      ...(enemyPassiveNames.length > 0 ? [`**被動：** ${enemyPassiveNames.join('、')}`] : []),
     ].join('\n'),
     inline: false,
   };

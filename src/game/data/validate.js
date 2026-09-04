@@ -11,6 +11,7 @@ import { MONSTER_ACTION_RULES } from './monster-actions.js';
 import {
   MONSTER_SKILLS,
   MonsterSkillActivation,
+  MonsterPassiveEffectType,
   MonsterSkillTrigger,
 } from './monster-skills.js';
 import { PLAYER_PROGRESSION_RULES } from './player-progression.js';
@@ -76,6 +77,11 @@ export function validateGameData() {
       && !Object.values(MonsterSkillTrigger).includes(skill.trigger)
     ) {
       errors.push(`怪物被動 ${skill.id} 的 trigger 不合法：${skill.trigger}`);
+    }
+    for (const effect of skill.passiveEffects ?? []) {
+      if (!Object.values(MonsterPassiveEffectType).includes(effect.type)) {
+        errors.push(`怪物被動 ${skill.id} 的 passiveEffects.type 不合法：${effect.type}`);
+      }
     }
   }
 

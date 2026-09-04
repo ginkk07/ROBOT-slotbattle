@@ -6,6 +6,7 @@ export {
   contentTypeMeta,
 } from './content-types.js';
 export { DAMAGE_SOURCES, DamageSource } from './damage-sources.js';
+export { ATTACK_TRIGGERS, AttackTrigger } from './attack-triggers.js';
 export { EVENT_RULES } from './event-rules.js';
 export { EVENTS, getEvent } from './events.js';
 export { EFFECT_TYPES, EffectType } from './effect-types.js';
@@ -20,6 +21,8 @@ export { LOOT_TABLES, getLootTable } from './loot-tables.js';
 export {
   MONSTER_SKILLS,
   MonsterSkillActivation,
+  MonsterPassiveEffectType,
+  MonsterSkillTrigger,
   getMonsterSkill,
 } from './monster-skills.js';
 export {
