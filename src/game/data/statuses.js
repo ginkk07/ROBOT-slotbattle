@@ -82,7 +82,7 @@ export const STATUSES = createCatalog([
     id: 'iron-eating',
     name: '食鐵',
     emoji: STATUS_EMOJI[StatusPolarity.BUFF],
-    description: '攻擊前依目標目前護甲，每6點累積下回合＋1基礎攻擊與＋1基礎防禦。',
+    description: '每次攻擊 Hit 前依目標目前護甲，每 6 點立即＋1基礎攻擊與＋1基礎防禦。',
     polarity: StatusPolarity.BUFF,
     category: 'monster-passive',
     trigger: StatusTrigger.PASSIVE,
