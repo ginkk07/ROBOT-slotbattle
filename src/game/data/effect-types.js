@@ -9,6 +9,7 @@ export const EffectType = deepFreeze({
   DAMAGE: 'damage',
   GAIN_RESOURCE: 'gain-resource',
   DAMAGE_FROM_RESOURCE: 'damage-from-resource',
+  GAIN_BASE_DEFENSE: 'gain-base-defense',
   APPLY_STATUS: 'apply-status',
   REMOVE_STATUS: 'remove-status',
 });

@@ -13,7 +13,7 @@ D1 既有兩張資料表皆保存 JSON，因此本版不需要新增 migration�
 
 ## 整輪冒險狀態
 
-`GameState.schemaVersion` 為 `6`，v3～v5 冒險與更舊的 Boss 戰存檔會在讀取時自動升級。舊版初始「燃焰之劍」會遷移成普通「長劍」，不會直接取得新版傳說效果。主要階段如下：
+`GameState.schemaVersion` 為 `7`，v3～v6 冒險與更舊的 Boss 戰存檔會在讀取時自動升級。舊版初始「燃焰之劍」會遷移成普通「長劍」，不會直接取得新版傳說效果。主要階段如下：
 
 | `phase` | 玩家操作 | 結束條件 |
 |---|---|---|
@@ -93,9 +93,13 @@ $$
 只使用此倍率重新計算：
 
 - `maxHp = ceil(baseMaxHp × M)`
-- `baseDamage = ceil(baseAttack × M)`
+- `baseDamage = ceil(baseDamage × M)`
 
 怪物持有技能、技能倍率、普通攻擊／技能機率、抗性、狀態規則及所有其他資料保持不變。怪物技能的主要傷害使用縮放後的 `baseDamage × skill.power`，所以攻擊力與技能共用同一個基礎傷害來源。
+
+## 基礎防禦力
+
+單位資料使用 `baseDamage`、`baseDefense` 與 `armor` 三個獨立欄位。`baseDefense` 不是減傷率，也不會直接扣除傷害；怪物每次回合開始時都將目前 `armor` 重設為 `baseDefense`，因此上一回合尚未消耗的護甲不會累加。戰鬥中以 `gain-base-defense` 提升基礎防禦力時，當前護甲維持不變，下一次回合開始才依新數值重設。Discord 面板只顯示當前 `armor`。
 
 ## 怪物技能與行動
 

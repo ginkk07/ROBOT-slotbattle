@@ -88,9 +88,40 @@ function eventState(eventId, skillIds = ['power-strike']) {
 
 test('新戰鬥取得4點行動點，護甲與法力從0開始', () => {
   const state = game();
-  assert.equal(state.schemaVersion, 6);
+  assert.equal(state.schemaVersion, 7);
   assert.equal(state.phase, GamePhase.PLAYER_TURN);
   assert.deepEqual(state.resources, { action: 4, armor: 0, mana: 0 });
+  assert.equal(state.enemy.baseDefense, 0);
+  assert.equal(state.enemy.armor, 0);
+});
+
+test('怪物基礎防禦力會在每個怪物回合開始重設護甲，不會累加', () => {
+  let state = game({ enemy: { baseDamage: 0, baseDefense: 3 } });
+
+  assert.equal(state.enemy.baseDefense, 3);
+  assert.equal(state.enemy.armor, 3);
+
+  state = placeBet(state, 2, { reels: [ATTACK, DEFENSE, SKILL] });
+  assert.equal(state.enemy.hp, 60);
+  assert.equal(state.enemy.armor, 1);
+  assert.equal(state.lastImpact.enemyArmorUsed, 2);
+
+  // 護甲先吸收傷害；超過剩餘護甲的部分才扣除 HP。
+  state = placeBet(state, 2, { reels: [ATTACK, DEFENSE, SKILL] });
+  assert.equal(state.enemy.armor, 0);
+  assert.equal(state.enemy.hp, 59);
+  assert.equal(state.lastImpact.enemyArmorUsed, 1);
+
+  state = endPlayerTurn(state, { monsterRng: zero });
+  assert.equal(state.enemy.armor, 3);
+  assert.equal(state.enemy.hp, 59);
+
+  // 戰鬥中變更的是基礎值；當下護甲不變，下個怪物回合才使用新數值。
+  state.enemy.baseDefense += 2;
+  assert.equal(state.enemy.armor, 3);
+  state = endPlayerTurn(state, { monsterRng: zero });
+  assert.equal(state.enemy.baseDefense, 5);
+  assert.equal(state.enemy.armor, 5);
 });
 
 test('每次拉霸會立即攻擊並累積本回合護甲與法力', () => {
@@ -563,7 +594,8 @@ test('神秘泉水有20%機率回滿生命後進入菁英戰鬥，整個奇遇�
 
   state.enemy.hp = 1;
   state = placeBet(state, 1, {
-    reels: [ATTACK, ATTACK, DEFENSE],
+    // 菁英怪現在會先以其 baseDefense 承受傷害。
+    reels: [ATTACK, ATTACK, ATTACK],
     rewardRng: zero,
   });
   assert.equal(state.phase, GamePhase.VICTORY_CONFIRM);
@@ -978,7 +1010,7 @@ test('舊版Boss戰存檔會升級為冒險格式', () => {
   legacy.resources = { action: 1, attack: 6, defense: 3, skill: 2 };
   const upgraded = upgradeGameState(legacy);
 
-  assert.equal(upgraded.schemaVersion, 6);
+  assert.equal(upgraded.schemaVersion, 7);
   assert.equal(upgraded.enemy.hp, 54);
   assert.deepEqual(upgraded.resources, { action: 1, armor: 3, mana: 2 });
   assert.equal(upgraded.adventure.regionDepth, 1);

@@ -200,8 +200,8 @@ test('懸賞令、頌缽與平安符在各自時機生效', () => {
   });
   assert.equal(bounty.resources.armor, 20);
   bounty = placeBet(bounty, 1, { reels: [ATTACK, DEFENSE, SKILL] });
-  // 1點牌面傷害＋懸賞令攻擊力3，之後由菁英的護甲強化降低20%。
-  assert.equal(bounty.lastImpact.attackDamage, 3);
+  // 1點牌面傷害＋懸賞令攻擊力3，先由護甲強化降為3，再扣除菁英的2點基礎護甲。
+  assert.equal(bounty.lastImpact.attackDamage, 1);
 
   let bowl = battle(['singing-bowl', 'healing-potion']);
   bowl.player.hp = 30;

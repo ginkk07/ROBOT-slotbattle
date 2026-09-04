@@ -56,9 +56,12 @@ export function validateGameData() {
       )).length !== expectedSkillCount) {
         errors.push(`單位 ${unit.id} 必須有 ${expectedSkillCount} 個怪物技能`);
       }
-      if (!Number.isFinite(unit.stats.attack) || unit.stats.attack <= 0) {
+      if (!Number.isFinite(unit.stats.baseDamage) || unit.stats.baseDamage <= 0) {
         errors.push(`單位 ${unit.id} 的基礎傷害必須大於0`);
       }
+    }
+    if (!Number.isFinite(unit.stats.baseDefense) || unit.stats.baseDefense < 0) {
+      errors.push(`單位 ${unit.id} 的基礎防禦力必須是非負數`);
     }
   }
 

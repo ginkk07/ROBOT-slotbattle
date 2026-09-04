@@ -39,6 +39,26 @@ test('技能與道具使用同一套治療效果處理器', () => {
   assert.equal(state.player.hp, 40);
 });
 
+test('提升基礎防禦力只改變baseDefense，當前護甲維持至下回合重設', () => {
+  const state = game();
+  state.enemy.armor = 1;
+
+  const result = applyEffects({
+    effects: [{ type: 'gain-base-defense', amount: 2, target: 'enemy' }],
+    source: state.player,
+    target: state.enemy,
+  });
+
+  assert.equal(result.target.baseDefense, 2);
+  assert.equal(result.target.armor, 1);
+  assert.deepEqual(result.events[0], {
+    type: 'gain-base-defense',
+    amount: 2,
+    baseDefense: 2,
+    target: 'enemy',
+  });
+});
+
 test('被動技能由觸發時機與處理器註冊表統一結算', () => {
   const result = resolvePassiveSkillEffects(
     {

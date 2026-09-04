@@ -12,6 +12,7 @@ const EFFECT_HANDLERS = Object.freeze({
   [EffectType.DAMAGE]: applyDamageEffect,
   [EffectType.GAIN_RESOURCE]: applyGainResourceEffect,
   [EffectType.DAMAGE_FROM_RESOURCE]: applyDamageFromResourceEffect,
+  [EffectType.GAIN_BASE_DEFENSE]: applyGainBaseDefenseEffect,
   [EffectType.APPLY_STATUS]: applyStatusEffect,
   [EffectType.REMOVE_STATUS]: applyRemoveStatusEffect,
 });
@@ -175,6 +176,23 @@ function applyDamageFromResourceEffect({
     resource: effect.resource,
     resourceSpent,
     resourceRemaining: remaining,
+  }];
+}
+
+/**
+ * 基礎防禦力是整場戰鬥持續的屬性，不直接增加目前 armor。
+ * 下一次該單位回合開始時，戰鬥引擎會以新的 baseDefense 重設 armor。
+ */
+function applyGainBaseDefenseEffect({ effect, source, target, points }) {
+  const recipient = effectRecipient(effect, source, target);
+  const amount = effectAmount(effect, points);
+  const before = Math.max(0, Number(recipient.baseDefense ?? 0));
+  recipient.baseDefense = before + amount;
+  return [{
+    type: 'gain-base-defense',
+    amount,
+    baseDefense: recipient.baseDefense,
+    target: effect.target,
   }];
 }
 

@@ -92,7 +92,7 @@ import { drawReels, resolveSymbolChances } from './random.js';
 import { scoreSpin } from './scoring.js';
 import { SYMBOL_META, SymbolId } from './symbols.js';
 
-export const GAME_STATE_VERSION = 6;
+export const GAME_STATE_VERSION = 7;
 
 export const GameStatus = Object.freeze({
   ACTIVE: 'active',
@@ -150,6 +150,7 @@ export function createGame({
       tags: [...playerUnit.tags],
       hp: config.playerMaxHp,
       maxHp: config.playerMaxHp,
+      baseDefense: Math.max(0, Number(playerUnit.stats.baseDefense ?? 0)),
       gold: 0,
       skillIds: selectedSkillIds,
       skillLevels: Object.fromEntries(selectedSkillIds.map((skillId) => [skillId, 1])),
@@ -644,6 +645,7 @@ export function endPlayerTurn(
     StatusTrigger.TURN_START,
   );
   next.enemy = enemyTurnStartStatus.unit;
+  resetUnitArmorToBaseDefense(next.enemy);
   if (next.enemy.hp === 0) {
     awaitCombatVictoryConfirmation(next);
     return next;
@@ -746,6 +748,7 @@ export function endPlayerTurn(
     next.combatModifiers.damageDealtBySource = createDamageSourceTotals();
     next.combatModifiers.usedTurnEquipmentEffects = {};
     next.resources.action = playerActionLimit(next);
+    resetPlayerArmorToBaseDefense(next);
     playerTurnStartStatus = resolveTriggeredStatuses(
       next,
       'player',
@@ -1797,7 +1800,7 @@ export function upgradeGameState(value) {
     return next;
   }
 
-  if (next.schemaVersion === 5) {
+  if (next.schemaVersion === 5 || next.schemaVersion === 6) {
     next.schemaVersion = GAME_STATE_VERSION;
     ensureCurrentFields(next);
     return next;
@@ -3131,6 +3134,10 @@ function applyEnemyOverrides(enemy, overrides) {
   if (overrides.baseDamage !== undefined) {
     enemy.baseDamage = Number(overrides.baseDamage);
   }
+  if (overrides.baseDefense !== undefined) {
+    enemy.baseDefense = Math.max(0, Number(overrides.baseDefense));
+    enemy.armor = enemy.baseDefense;
+  }
   if (overrides.armor !== undefined) enemy.armor = Math.max(0, Number(overrides.armor));
   if (overrides.damageResistances) {
     enemy.damageResistances = structuredClone(overrides.damageResistances);
@@ -3138,8 +3145,24 @@ function applyEnemyOverrides(enemy, overrides) {
   if (overrides.lootTableId) enemy.lootTableId = overrides.lootTableId;
 }
 
+function resetUnitArmorToBaseDefense(unit) {
+  unit.armor = Math.max(0, Number(unit.baseDefense ?? 0));
+}
+
+function resetPlayerArmorToBaseDefense(state) {
+  const baseDefense = Math.max(0, Number(state.player.baseDefense ?? 0));
+  // 玩家現有的「金剛石」等裝備可明確保留護甲；沒有基礎防禦力時，
+  // 不覆寫這類既有的特殊保留效果。日後取得 baseDefense 時則依本系統重設。
+  if (baseDefense > 0) state.resources.armor = baseDefense;
+}
+
 function ensureCurrentFields(state) {
   state.player = normalizePlayerSkills(state.player);
+  const playerUnit = getUnit(state.player.unitId ?? 'wanderer');
+  state.player.baseDefense = Math.max(
+    0,
+    Number(state.player.baseDefense ?? playerUnit.stats.baseDefense ?? 0),
+  );
   state.player.gold = Math.max(0, Math.floor(Number(state.player.gold ?? 0)));
   state.player.activeStatuses ??= [];
   state.player.pendingSealedSkillIds ??= [];
@@ -3188,6 +3211,11 @@ function ensureCurrentFields(state) {
     }
   }
   if (state.enemy) {
+    const enemyUnit = getUnit(state.enemy.unitId ?? 'ruins-sentinel');
+    state.enemy.baseDefense = Math.max(
+      0,
+      Number(state.enemy.baseDefense ?? enemyUnit.stats.baseDefense ?? 0),
+    );
     state.enemy.armor = Math.max(0, Number(state.enemy.armor ?? 0));
     state.enemy.activeStatuses ??= [];
     state.enemy.intent ??= {
@@ -3252,7 +3280,7 @@ function upgradeLegacyState(legacy) {
       baseDamage: Number(
         legacyBoss.baseDamage
         ?? legacy.config?.boss?.attackPattern?.[(next.round ?? 1) - 1]
-        ?? unit.stats.attack,
+        ?? unit.stats.baseDamage,
       ),
       activeStatuses: structuredClone(legacyBoss.activeStatuses ?? []),
     };

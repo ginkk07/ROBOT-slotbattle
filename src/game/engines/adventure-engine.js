@@ -126,10 +126,13 @@ export function scaleEnemyUnit(unit, depth, region = getRegion('ruins')) {
     tags: [...unit.tags],
     hp: Math.ceil(unit.stats.maxHp * multipliers.maxHp),
     maxHp: Math.ceil(unit.stats.maxHp * multipliers.maxHp),
-    armor: Math.max(0, Number(unit.stats.armor ?? 0)),
-    baseDamage: Math.ceil(unit.stats.attack * multipliers.baseDamage),
+    // armor 是本回合實際護甲；每次輪到怪物時都會由 baseDefense 重設。
+    // 新戰鬥已位於第 1 回合，因此先建立對應的初始護甲。
+    baseDefense: Math.max(0, Number(unit.stats.baseDefense ?? 0)),
+    armor: Math.max(0, Number(unit.stats.baseDefense ?? 0)),
+    baseDamage: Math.ceil(unit.stats.baseDamage * multipliers.baseDamage),
     baseMaxHp: unit.stats.maxHp,
-    baseDamageBeforeScaling: unit.stats.attack,
+    baseDamageBeforeScaling: unit.stats.baseDamage,
     regionMultipliers: multipliers,
     skillIds: [...unit.skillIds],
     damageResistances: { ...unit.damageResistances },
