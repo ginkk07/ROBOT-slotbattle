@@ -162,9 +162,13 @@ export function renderWagerModal(state) {
 
 function renderCombat(state) {
   const enemyArmor = Math.max(0, Number(state.enemy.armor ?? 0));
+  const enemyStatusIds = new Set((state.enemy.activeStatuses ?? []).map((status) => status.statusId));
   const enemyPassiveNames = state.enemy.skillIds
     .map((skillId) => getMonsterSkill(skillId))
-    .filter((skill) => skill.activation === MonsterSkillActivation.PASSIVE)
+    .filter((skill) => (
+      skill.activation === MonsterSkillActivation.PASSIVE
+      && !enemyStatusIds.has(skill.id)
+    ))
     .map((skill) => skill.name);
   const enemyField = {
     name: `👹 ${rankLabel(state.enemy.rank)}${state.enemy.name} HP　${state.enemy.hp}/${state.enemy.maxHp}${enemyArmor > 0 ? `　🛡️ ${enemyArmor}` : ''}`,

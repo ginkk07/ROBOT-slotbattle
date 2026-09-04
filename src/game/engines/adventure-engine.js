@@ -123,8 +123,6 @@ export function scaleEnemyUnit(unit, depth, region = getRegion('ruins')) {
     // armor 是本回合實際護甲；每次輪到怪物時都會由 baseDefense 重設。
     // 新戰鬥已位於第 1 回合，因此先建立對應的初始護甲。
     baseDefense: Math.max(0, Number(unit.stats.baseDefense ?? 0)),
-    pendingBaseDamage: 0,
-    pendingBaseDefense: 0,
     armor: Math.max(0, Number(unit.stats.baseDefense ?? 0)),
     baseDamage: Math.ceil(unit.stats.baseDamage * multipliers.baseDamage),
     baseMaxHp: unit.stats.maxHp,

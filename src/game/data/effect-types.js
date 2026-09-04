@@ -12,6 +12,7 @@ export const EffectType = deepFreeze({
   GAIN_BASE_DEFENSE: 'gain-base-defense',
   APPLY_STATUS: 'apply-status',
   REMOVE_STATUS: 'remove-status',
+  REMOVE_RESOURCE: 'remove-resource',
 });
 
 export const EFFECT_TYPES = deepFreeze(Object.values(EffectType));

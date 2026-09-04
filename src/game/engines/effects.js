@@ -15,6 +15,7 @@ const EFFECT_HANDLERS = Object.freeze({
   [EffectType.GAIN_BASE_DEFENSE]: applyGainBaseDefenseEffect,
   [EffectType.APPLY_STATUS]: applyStatusEffect,
   [EffectType.REMOVE_STATUS]: applyRemoveStatusEffect,
+  [EffectType.REMOVE_RESOURCE]: applyRemoveResourceEffect,
 });
 
 /**
@@ -123,6 +124,18 @@ function applyGainResourceEffect({
     type: 'gain-resource',
     resource: effect.resource,
     requested,
+    amount,
+    target: effect.target,
+  }];
+}
+
+function applyRemoveResourceEffect({ effect, resources }) {
+  assertResourceContext(resources, effect.resource);
+  const amount = Math.max(0, Number(resources[effect.resource] ?? 0));
+  resources[effect.resource] = 0;
+  return [{
+    type: EffectType.REMOVE_RESOURCE,
+    resource: effect.resource,
     amount,
     target: effect.target,
   }];

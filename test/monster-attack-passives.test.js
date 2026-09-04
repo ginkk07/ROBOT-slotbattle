@@ -13,10 +13,10 @@ function stateWithArmor(armor) {
   return {
     enemy: {
       ...structuredClone(unit),
+      hp: 45,
       baseDamage: 6,
       baseDefense: 0,
-      pendingBaseDamage: 0,
-      pendingBaseDefense: 0,
+      armor: 0,
     },
     player: { hp: 45 },
     resources: { armor },
@@ -27,24 +27,25 @@ function armorOf(state, key) {
   return key === 'player' ? state.resources.armor : state[key].armor ?? 0;
 }
 
-test('食鐵只依攻擊前護甲累積下回合的基礎能力，不改變當前能力或護甲', () => {
+test('食鐵在每個 Attack Hit 前依當下護甲立即增加基礎能力，不消耗護甲', () => {
   const unit = getUnit('iron-beast');
   assert.deepEqual(unit.skillIds, ['iron-eating']);
   assert.equal(unit.requiredActiveSkillCount, 0);
   assert.equal(selectMonsterIntent(unit, { rng: () => 0.99 }).type, 'basic-attack');
 
-  for (const [armor, expectedGain] of [[4, 0], [5, 1], [30, 6]]) {
+  for (const [armor, expectedGain] of [[5, 0], [6, 1], [30, 5]]) {
     const state = stateWithArmor(armor);
     const events = resolveMonsterAttackPassives(state, {
       attackerKey: 'enemy',
       targetKey: 'player',
     }, AttackTrigger.BEFORE_ATTACK_HIT, armorOf);
 
-    assert.equal(state.enemy.baseDamage, 6);
-    assert.equal(state.enemy.baseDefense, 0);
+    assert.equal(state.enemy.baseDamage, 6 + expectedGain);
+    assert.equal(state.enemy.baseDefense, expectedGain);
+    assert.equal(state.enemy.armor, 0);
     assert.equal(state.resources.armor, armor);
-    assert.equal(state.enemy.pendingBaseDamage, expectedGain);
-    assert.equal(state.enemy.pendingBaseDefense, expectedGain);
     assert.equal(events[0]?.gain ?? 0, expectedGain);
+    assert.equal(events[0]?.baseDamage ?? 6, 6 + expectedGain);
+    assert.equal(events[0]?.baseDefense ?? 0, expectedGain);
   }
 });

@@ -88,7 +88,7 @@ function eventState(eventId, skillIds = ['power-strike']) {
 
 test('新戰鬥取得4點行動點，護甲與法力從0開始', () => {
   const state = game();
-  assert.equal(state.schemaVersion, 9);
+  assert.equal(state.schemaVersion, 10);
   assert.equal(state.phase, GamePhase.PLAYER_TURN);
   assert.deepEqual(state.resources, { action: 4, armor: 0, mana: 0 });
   assert.equal(state.enemy.baseDefense, 0);
@@ -124,7 +124,7 @@ test('怪物基礎防禦力會在每個 ROUND_START 重設護甲，不會累加'
   assert.equal(state.enemy.armor, 5);
 });
 
-test('鐵甲獸的食鐵在下一個 ROUND_START 同時套用攻擊、防禦並立刻形成護甲', () => {
+test('鐵甲獸的食鐵在當前 Hit 前立即增加攻擊與防禦，護甲留待下個 ROUND_START 重設', () => {
   let state = game({
     initialEnemyUnitId: 'iron-beast',
     enemy: { maxHp: 45, baseDamage: 6, baseDefense: 0 },
@@ -136,29 +136,68 @@ test('鐵甲獸的食鐵在下一個 ROUND_START 同時套用攻擊、防禦並�
   const ironEating = state.lastResolution.monsterEffectEvents.find((event) => (
     event.skillId === 'iron-eating'
   ));
-  assert.equal(ironEating.gain, 6);
-  assert.equal(ironEating.appliesAt, 'next-round-start');
-  assert.equal(state.enemy.baseDamage, 12);
-  assert.equal(state.enemy.baseDefense, 6);
-  assert.equal(state.enemy.pendingBaseDamage, 0);
-  assert.equal(state.enemy.pendingBaseDefense, 0);
-  assert.equal(state.enemy.armor, 6);
+  assert.equal(ironEating.gain, 5);
+  assert.equal(state.enemy.baseDamage, 11);
+  assert.equal(state.enemy.baseDefense, 5);
+  assert.equal(state.lastResolution.enemyAttack, 11);
+  assert.equal(state.enemy.armor, 5);
 });
 
-test('schema v8 存檔補上通用 pending 基礎能力欄位', () => {
-  const legacy = game();
-  legacy.schemaVersion = 8;
-  delete legacy.player.pendingBaseDamage;
-  delete legacy.player.pendingBaseDefense;
-  delete legacy.enemy.pendingBaseDamage;
-  delete legacy.enemy.pendingBaseDefense;
+test('秘法獵犬的退魔擊以執行時法力加算傷害，傷害後清空剩餘法力', () => {
+  let state = createGame({
+    id: 'mana-purge-strike',
+    ownerId: 'player-1',
+    config: { initialEnemyUnitId: 'arcane-hound' },
+    monsterRng: sequence([0.6, 0]),
+  });
+  assert.equal(state.enemy.intent.skillId, 'mana-purge-strike');
+  state.resources.mana = 5;
 
-  const upgraded = upgradeGameState(legacy);
-  assert.equal(upgraded.schemaVersion, 9);
-  assert.equal(upgraded.player.pendingBaseDamage, 0);
-  assert.equal(upgraded.player.pendingBaseDefense, 0);
-  assert.equal(upgraded.enemy.pendingBaseDamage, 0);
-  assert.equal(upgraded.enemy.pendingBaseDefense, 0);
+  state = endPlayerTurn(state, { monsterRng: zero });
+
+  assert.equal(state.lastResolution.enemyAttack, 17);
+  assert.equal(state.lastResolution.damageTaken, 17);
+  assert.equal(state.resources.mana, 0);
+  assert.ok(state.lastResolution.monsterEffectEvents.some((event) => (
+    event.type === 'remove-resource' && event.resource === 'mana' && event.amount === 5
+  )));
+});
+
+test('岩甲蜥蜴開戰持有硬化鱗甲，僅在受到 Attack Hit 後回復基礎護甲', () => {
+  let state = createGame({
+    id: 'hardened-scales',
+    ownerId: 'player-1',
+    config: { initialEnemyUnitId: 'rockscale-lizard' },
+    loadout: { skillIds: ['power-strike'], itemIds: ['fire-bomb'] },
+    monsterRng: zero,
+  });
+  assert.ok(state.enemy.activeStatuses.some((status) => status.statusId === 'hardened-scales'));
+  assert.equal(state.enemy.armor, 2);
+
+  state = placeBet(state, 1, { reels: [ATTACK, DEFENSE, SKILL] });
+  assert.equal(state.enemy.armor, 3);
+
+  state.enemy.armor = 0;
+  state = useItem(state, 'fire-bomb', { rng: zero });
+  assert.equal(state.enemy.armor, 0);
+});
+
+test('v8 與 v9 存檔移除已廢棄的 pending 基礎能力欄位', () => {
+  const legacy = game();
+  for (const schemaVersion of [8, 9]) {
+    const source = structuredClone(legacy);
+    source.schemaVersion = schemaVersion;
+    source.player.pendingBaseDamage = 3;
+    source.player.pendingBaseDefense = 3;
+    source.enemy.pendingBaseDamage = 4;
+    source.enemy.pendingBaseDefense = 4;
+    const upgraded = upgradeGameState(source);
+    assert.equal(upgraded.schemaVersion, 10);
+    assert.equal(Object.hasOwn(upgraded.player, 'pendingBaseDamage'), false);
+    assert.equal(Object.hasOwn(upgraded.player, 'pendingBaseDefense'), false);
+    assert.equal(Object.hasOwn(upgraded.enemy, 'pendingBaseDamage'), false);
+    assert.equal(Object.hasOwn(upgraded.enemy, 'pendingBaseDefense'), false);
+  }
 });
 
 test('第一個 Round 也會完成 ROUND_START 與 PLAYER_TURN_START', () => {
@@ -1161,7 +1200,7 @@ test('舊版Boss戰存檔會升級為冒險格式', () => {
   legacy.resources = { action: 1, attack: 6, defense: 3, skill: 2 };
   const upgraded = upgradeGameState(legacy);
 
-  assert.equal(upgraded.schemaVersion, 9);
+  assert.equal(upgraded.schemaVersion, 10);
   assert.equal(upgraded.enemy.hp, 54);
   assert.deepEqual(upgraded.resources, { action: 1, armor: 3, mana: 2 });
   assert.equal(upgraded.adventure.regionDepth, 1);

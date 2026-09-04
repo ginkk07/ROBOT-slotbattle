@@ -58,6 +58,7 @@ export const StatusEffectType = Object.freeze({
   SHARE_DAMAGE: 'share-damage',
   REFLECT_DAMAGE: 'reflect-damage',
   REMOVE_ARMOR_BEFORE_DAMAGE: 'remove-armor-before-damage',
+  NONE: 'none',
 });
 
 export const STATUS_TRIGGERS = Object.freeze(Object.values(StatusTrigger));
@@ -75,6 +76,34 @@ export const STATUSES = createCatalog([
     defaultDuration: null,
     stacking: { mode: 'refresh-duration', maxStacks: 1 },
     effect: { type: StatusEffectType.REDUCE_DAMAGE_TAKEN, amountPerPotency: 0.2 },
+    bossRule: { mode: BossRuleMode.NORMAL },
+  },
+  {
+    id: 'iron-eating',
+    name: '食鐵',
+    emoji: STATUS_EMOJI[StatusPolarity.BUFF],
+    description: '攻擊前依目標目前護甲，每6點累積下回合＋1基礎攻擊與＋1基礎防禦。',
+    polarity: StatusPolarity.BUFF,
+    category: 'monster-passive',
+    trigger: StatusTrigger.PASSIVE,
+    durationMode: 'battle',
+    defaultDuration: null,
+    stacking: { mode: 'stack-potency', maxStacks: 999 },
+    effect: { type: StatusEffectType.NONE },
+    bossRule: { mode: BossRuleMode.NORMAL },
+  },
+  {
+    id: 'hardened-scales',
+    name: '硬化鱗甲',
+    emoji: STATUS_EMOJI[StatusPolarity.BUFF],
+    description: '每次受到攻擊傷害後，獲得等同自身基礎防禦的護甲。',
+    polarity: StatusPolarity.BUFF,
+    category: 'monster-passive',
+    trigger: StatusTrigger.PASSIVE,
+    durationMode: 'battle',
+    defaultDuration: null,
+    stacking: { mode: 'stack-potency', maxStacks: 999 },
+    effect: { type: StatusEffectType.NONE },
     bossRule: { mode: BossRuleMode.NORMAL },
   },
   {

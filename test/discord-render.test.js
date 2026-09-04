@@ -111,7 +111,7 @@ test('戰鬥面板使用自由投入、技能、道具與回合結束按鈕', ()
   );
 });
 
-test('鐵甲獸戰鬥面板顯示被動名稱，不公開食鐵內部公式', () => {
+test('鐵甲獸戰鬥面板顯示食鐵狀態，不公開食鐵內部公式', () => {
   const state = createGame({
     id: 'iron-beast-render',
     ownerId: 'player-1',
@@ -122,7 +122,7 @@ test('鐵甲獸戰鬥面板顯示被動名稱，不公開食鐵內部公式', ()
     field.name.includes('鐵甲獸')
   ));
 
-  assert.match(enemy.value, /被動：\*\* 食鐵/);
+  assert.match(enemy.value, /🔺食鐵/);
   assert.doesNotMatch(enemy.value, /floor|pendingBaseDamage|pendingBaseDefense/);
 });
 

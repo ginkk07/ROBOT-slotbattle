@@ -1,5 +1,6 @@
 import { createCatalog, requireDefinition } from './catalog.js';
 import { AttackTrigger } from './attack-triggers.js';
+import { EffectType } from './effect-types.js';
 
 export const MonsterSkillActivation = Object.freeze({
   ACTIVE: 'active',
@@ -18,7 +19,8 @@ export const MonsterSkillTrigger = Object.freeze({
 });
 
 export const MonsterPassiveEffectType = Object.freeze({
-  GAIN_PENDING_BASE_STATS_FROM_TARGET_ARMOR: 'gain-pending-base-stats-from-target-armor',
+  GAIN_BASE_STATS_FROM_TARGET_ARMOR: 'gain-base-stats-from-target-armor',
+  GAIN_ARMOR_FROM_BASE_DEFENSE: 'gain-armor-from-base-defense',
 });
 
 export const MONSTER_SKILLS = createCatalog([
@@ -28,9 +30,16 @@ export const MONSTER_SKILLS = createCatalog([
     activation: MonsterSkillActivation.PASSIVE,
     trigger: MonsterSkillTrigger.BEFORE_ATTACK_HIT,
     description: '攻擊前依目標護甲累積下回合生效的攻擊與防禦。',
+    battleStartEffects: [{
+      type: EffectType.APPLY_STATUS,
+      statusId: 'iron-eating',
+      target: 'self',
+      chance: 1,
+      potency: 1,
+    }],
     passiveEffects: [{
-      type: MonsterPassiveEffectType.GAIN_PENDING_BASE_STATS_FROM_TARGET_ARMOR,
-      armorPerGain: 5,
+      type: MonsterPassiveEffectType.GAIN_BASE_STATS_FROM_TARGET_ARMOR,
+      armorPerGain: 6,
     }],
   },
   {
@@ -48,10 +57,10 @@ export const MONSTER_SKILLS = createCatalog([
   },
   {
     id: 'guardian-strike',
-    name: '守衛重擊',
+    name: '重擊',
     activation: MonsterSkillActivation.ACTIVE,
     power: 1.25,
-    description: '造成基礎傷害 125% 的傷害。',
+    description: '造成基礎攻擊 125% 的傷害。',
     effects: [],
   },
   {
@@ -59,7 +68,7 @@ export const MONSTER_SKILLS = createCatalog([
     name: '破甲攻擊',
     activation: MonsterSkillActivation.ACTIVE,
     power: 1,
-    description: '造成基礎傷害100%的傷害，並使玩家獲得2層裝甲破壞。',
+    description: '造成基礎攻擊 100% 的傷害，並使玩家獲得 2 層裝甲破壞。',
     effects: [{
       type: 'apply-status',
       attackTrigger: AttackTrigger.AFTER_ATTACK_HIT,
@@ -71,11 +80,43 @@ export const MONSTER_SKILLS = createCatalog([
     }],
   },
   {
+    id: 'mana-purge-strike',
+    name: '退魔擊',
+    activation: MonsterSkillActivation.ACTIVE,
+    power: 1.25,
+    description: '造成基礎傷害125%加上目標目前法力的傷害，並在傷害結算後清空目標法力。',
+    damageFromTargetResource: { resource: 'mana', multiplier: 1 },
+    effects: [{
+      type: EffectType.REMOVE_RESOURCE,
+      attackTrigger: AttackTrigger.AFTER_ATTACK_HIT,
+      resource: 'mana',
+      target: 'enemy',
+    }],
+  },
+  {
+    id: 'hardened-scales',
+    name: '硬化鱗甲',
+    activation: MonsterSkillActivation.PASSIVE,
+    trigger: MonsterSkillTrigger.AFTER_ATTACK_HIT,
+    description: '每次受到攻擊傷害後，獲得等同自身基礎防禦的護甲。',
+    battleStartEffects: [{
+      type: EffectType.APPLY_STATUS,
+      statusId: 'hardened-scales',
+      target: 'self',
+      chance: 1,
+      potency: 1,
+    }],
+    passiveEffects: [{
+      type: MonsterPassiveEffectType.GAIN_ARMOR_FROM_BASE_DEFENSE,
+      multiplier: 1,
+    }],
+  },
+  {
     id: 'crushing-blow',
-    name: '粉碎重擊',
+    name: '粉碎重拳',
     activation: MonsterSkillActivation.ACTIVE,
     power: 1.5,
-    description: '造成基礎傷害 150% 的傷害。',
+    description: '造成基礎攻擊 150% 的傷害。',
     effects: [],
   },
   {
@@ -83,7 +124,7 @@ export const MONSTER_SKILLS = createCatalog([
     name: '遺跡超載',
     activation: MonsterSkillActivation.ACTIVE,
     power: 1.75,
-    description: '造成基礎傷害 175% 的傷害。',
+    description: '造成基礎攻擊 175% 的傷害。',
     effects: [],
   },
 ], '怪物技能庫');

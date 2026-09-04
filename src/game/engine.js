@@ -100,7 +100,7 @@ import { drawReels, resolveSymbolChances } from './random.js';
 import { scoreSpin } from './scoring.js';
 import { SYMBOL_META, SymbolId } from './symbols.js';
 
-export const GAME_STATE_VERSION = 9;
+export const GAME_STATE_VERSION = 10;
 
 export const GameStatus = Object.freeze({
   ACTIVE: 'active',
@@ -160,8 +160,6 @@ export function createGame({
       maxHp: config.playerMaxHp,
       baseDamage: Math.max(0, Number(playerUnit.stats.baseDamage ?? 0)),
       baseDefense: Math.max(0, Number(playerUnit.stats.baseDefense ?? 0)),
-      pendingBaseDamage: 0,
-      pendingBaseDefense: 0,
       gold: 0,
       skillIds: selectedSkillIds,
       skillLevels: Object.fromEntries(selectedSkillIds.map((skillId) => [skillId, 1])),
@@ -935,8 +933,6 @@ function beginRound(state, { monsterRng = Math.random } = {}) {
   state.combatModifiers.damageDealtBySource = createDamageSourceTotals();
   state.combatModifiers.usedTurnEquipmentEffects = {};
   state.resources.action = playerActionLimit(state);
-  applyPendingBaseStats(state.player);
-  applyPendingBaseStats(state.enemy);
   resetPlayerRoundArmor(state);
   resetUnitArmorToBaseDefense(state.enemy);
 
@@ -997,7 +993,9 @@ function beginEnemyTurn(state, { monsterRng }) {
 }
 
 function resolveEnemyTurn(state, { monsterRng }) {
-  const intent = resolveMonsterIntent(state.enemy, state.enemy.intent);
+  const intent = resolveMonsterIntent(state.enemy, state.enemy.intent, {
+    targetResources: state.resources,
+  });
   const attack = resolveAttack({
     attackId: intent.skillId ?? intent.type,
     damageSource: 'enemy-attack',
@@ -1037,10 +1035,16 @@ function resolveEnemyTurn(state, { monsterRng }) {
 }
 
 function resolveEnemyAttackHit(state, intent, context) {
+  // 食鐵等 BEFORE_ATTACK_HIT 被動已在本次 Hit 前更新怪物能力；在此重新
+  // 解析預告，才能讓這一 Hit 直接讀取更新後的 baseDamage。
+  const hitIntent = resolveMonsterIntent(state.enemy, intent, {
+    targetResources: state.resources,
+  });
+  Object.assign(intent, hitIntent);
   const armorBroken = removeArmorBeforeIncomingDamage(state);
-  const armorUsed = Math.min(state.resources.armor, intent.damage);
+  const armorUsed = Math.min(state.resources.armor, hitIntent.damage);
   state.resources.armor = Math.max(0, state.resources.armor - armorUsed);
-  const incomingAfterArmor = Math.max(0, intent.damage - armorUsed);
+  const incomingAfterArmor = Math.max(0, hitIntent.damage - armorUsed);
   const reducedIncomingDamage = reduceIncomingDamageWithEquipment(
     state.player,
     incomingAfterArmor,
@@ -1069,7 +1073,7 @@ function resolveEnemyAttackHit(state, intent, context) {
   const enemyAttackDamageEvent = {
     type: 'damage',
     element: 'physical',
-    requested: intent.damage,
+    requested: hitIntent.damage,
     amount: damageTaken,
     damageSource: DamageSource.EXTRA,
     target: 'self',
@@ -1080,12 +1084,12 @@ function resolveEnemyAttackHit(state, intent, context) {
   const damageFollowUpEvents = resolveDamageFollowUps(state, {
     attacker: 'enemy',
     target: 'player',
-    requested: intent.damage,
+    requested: hitIntent.damage,
     amount: damageTaken,
     damageSource: DamageSource.EXTRA,
   });
   return {
-    requestedDamage: intent.damage,
+    requestedDamage: hitIntent.damage,
     actualHpDamage: damageTaken,
     armorDamage: armorUsed,
     armorBroken,
@@ -1110,9 +1114,7 @@ function attackTargetArmor(state, targetKey) {
 
 function resolveAttackTriggerEffects(state, context, trigger, { intent, rng }) {
   const events = [];
-  if (context.attackerKey === 'enemy') {
-    events.push(...resolveMonsterAttackPassives(state, context, trigger, attackTargetArmor));
-  }
+  events.push(...resolveMonsterAttackPassives(state, context, trigger, attackTargetArmor));
   // 主動攻擊技能的附帶效果也只能由 Attack/Hit 階段啟動；破甲攻擊使用
   // AFTER_ATTACK_HIT，因此與一般的額外／狀態傷害不會混用。
   if (
@@ -1137,7 +1139,10 @@ function resolvePlayerAttackTriggerEffects(state, context, trigger) {
     attack: context,
   });
   state.resources = result.context.resources ?? state.resources;
-  return result.events;
+  return [
+    ...result.events,
+    ...resolveMonsterAttackPassives(state, context, trigger, attackTargetArmor),
+  ];
 }
 
 function runEnemyTurnEnd(state) {
@@ -2275,7 +2280,7 @@ export function upgradeGameState(value) {
     return next;
   }
 
-  if (next.schemaVersion === 8) {
+  if (next.schemaVersion === 8 || next.schemaVersion === 9) {
     next.schemaVersion = GAME_STATE_VERSION;
     ensureCurrentFields(next);
     return next;
@@ -2305,8 +2310,8 @@ export function upgradeGameState(value) {
 }
 
 function migrateRoundLifecycleState(state) {
-  // v7 以前會在玩家操作期間預先儲存下一次怪物 intent。新版必須在
-  // ENEMY_TURN_START 後才決定，所以升級中的戰鬥一律清除舊預告。
+  // v7 以前會在玩家操作期間預先儲存下一次怪物 intent。新版會在
+  // ROUND_START 決定，所以升級中的戰鬥一律清除舊預告。
   if (state.enemy) state.enemy.intent = null;
 }
 
@@ -2862,11 +2867,13 @@ function applyMonsterEffects(state, effects, { rng = Math.random } = {}) {
       effects: [effect],
       source: state.enemy,
       target: state.player,
+      resources: state.resources,
       damageSource: DamageSource.EXTRA,
       rng,
     });
     state.enemy = result.source;
     state.player = result.target;
+    state.resources = result.resources ?? state.resources;
     events.push(...result.events);
   }
   return events;
@@ -3664,12 +3671,6 @@ function applyEnemyOverrides(enemy, overrides) {
     enemy.baseDefense = Math.max(0, Number(overrides.baseDefense));
     enemy.armor = enemy.baseDefense;
   }
-  if (overrides.pendingBaseDamage !== undefined) {
-    enemy.pendingBaseDamage = Math.max(0, Number(overrides.pendingBaseDamage));
-  }
-  if (overrides.pendingBaseDefense !== undefined) {
-    enemy.pendingBaseDefense = Math.max(0, Number(overrides.pendingBaseDefense));
-  }
   if (overrides.armor !== undefined) enemy.armor = Math.max(0, Number(overrides.armor));
   if (overrides.damageResistances) {
     enemy.damageResistances = structuredClone(overrides.damageResistances);
@@ -3679,17 +3680,6 @@ function applyEnemyOverrides(enemy, overrides) {
 
 function resetUnitArmorToBaseDefense(unit) {
   unit.armor = Math.max(0, Number(unit.baseDefense ?? 0));
-}
-
-/** 把上一 Round 累積的基礎能力成長套入本 Round，並立即清空 pending。 */
-function applyPendingBaseStats(unit) {
-  if (!unit) return;
-  const pendingBaseDamage = Math.max(0, Number(unit.pendingBaseDamage ?? 0));
-  const pendingBaseDefense = Math.max(0, Number(unit.pendingBaseDefense ?? 0));
-  unit.baseDamage = Math.max(0, Number(unit.baseDamage ?? 0)) + pendingBaseDamage;
-  unit.baseDefense = Math.max(0, Number(unit.baseDefense ?? 0)) + pendingBaseDefense;
-  unit.pendingBaseDamage = 0;
-  unit.pendingBaseDefense = 0;
 }
 
 function resetPlayerRoundArmor(state) {
@@ -3711,8 +3701,8 @@ function ensureCurrentFields(state) {
     0,
     Number(state.player.baseDefense ?? playerUnit.stats.baseDefense ?? 0),
   );
-  state.player.pendingBaseDamage = Math.max(0, Number(state.player.pendingBaseDamage ?? 0));
-  state.player.pendingBaseDefense = Math.max(0, Number(state.player.pendingBaseDefense ?? 0));
+  delete state.player.pendingBaseDamage;
+  delete state.player.pendingBaseDefense;
   state.player.gold = Math.max(0, Math.floor(Number(state.player.gold ?? 0)));
   state.player.activeStatuses ??= [];
   state.player.pendingSealedSkillIds ??= [];
@@ -3767,8 +3757,8 @@ function ensureCurrentFields(state) {
       Number(state.enemy.baseDefense ?? enemyUnit.stats.baseDefense ?? 0),
     );
     state.enemy.armor = Math.max(0, Number(state.enemy.armor ?? 0));
-    state.enemy.pendingBaseDamage = Math.max(0, Number(state.enemy.pendingBaseDamage ?? 0));
-    state.enemy.pendingBaseDefense = Math.max(0, Number(state.enemy.pendingBaseDefense ?? 0));
+    delete state.enemy.pendingBaseDamage;
+    delete state.enemy.pendingBaseDefense;
     state.enemy.activeStatuses ??= [];
     state.enemy.intent ??= null;
   }
